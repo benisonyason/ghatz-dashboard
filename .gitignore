@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Sensitive files
+credentials.json
+script.py
+guraradamwaterlevel.csv
+rainfalldata.csv
+security_report.csv
+staffcomposition.csv
+stanpipedata.csv
+reliefwell_data.csv
+.streamlit/secrets.toml
+*.key
+*.pem
+
+# Streamlit
+.secrets.toml
+
+# IDE
+.vscode/
+.idea/
