@@ -16,7 +16,7 @@ guraradamwaterlevel.csv
 rainfalldata.csv
 security_report.csv
 staffcomposition.csv
-stanpipedata.csv
+standpipedata.csv
 reliefwell_data.csv
 .streamlit/secrets.toml
 *.key
