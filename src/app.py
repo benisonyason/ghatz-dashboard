@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from utils.gsheets import connect_to_gsheet
 
+
+current_year = datetime.now().year
+
 # Initialize connection with error handling
 try:
     client = connect_to_gsheet()
@@ -40,7 +43,6 @@ st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
     header {visibility: hidden;}
-    footer {visibility: hidden;}
     .stDeployButton {display: none;}
     
     .css-18e3th9 {
@@ -90,11 +92,6 @@ option = st.sidebar.selectbox(
 )
 
 # Footer
-current_year = datetime.now().year
-st.sidebar.markdown(
-    f'<div class="sidebar-footer">Developed by <b>Gridhall Limited</b> © {current_year}</div>',
-    unsafe_allow_html=True
-)
 
 # ========================================
 # PAGE CONTENT
@@ -574,3 +571,27 @@ elif option == "GHATZ Staff Composition":
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
+
+# Add the sticky footer
+st.markdown(
+
+    """
+    <style>
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: white;
+        color: black;
+        text-align: center;
+        padding: 10px;
+        border-top: 1px solid #e1e4e8;
+    }
+    </style>
+    <div class="footer">
+        Developed by <b>Gridhall Limited</b> © 2025 | All rights reserved.
+    </div>
+    """,
+    unsafe_allow_html=True
+)
