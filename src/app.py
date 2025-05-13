@@ -82,9 +82,9 @@ st.markdown(f"""
 # ========================================
 # SIDEBAR NAVIGATION
 # ========================================
-st.sidebar.header("Navigation")
+st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
-    "Choose a visualization:",
+    "Choose Data to visualization:",
     [
         "Home", "Data Overview", "Dam Instrumentation", "GHATZ Building Infrastructure",
         "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
@@ -97,22 +97,76 @@ option = st.sidebar.selectbox(
 # PAGE CONTENT
 # ========================================
 if option == "Home":
+    st.title("🌍 Welcome to GHATZ Analytics Platform")
     st.markdown("""
-        Welcome to the **GHATZ (Gurara Hydro, Agriculture, and Tourism Zone)** Data Analysis and Visualization Platform.
+    **Your central hub for Gurara Hydro, Agriculture, and Tourism Zone data intelligence**  
+    *Monitoring • Analysis • Decision Support*
+    """)
 
-        ### 🔍 What You Can Do Here:
-        - **Explore Instrumentation Records** for monitoring dam safety and performance.
-        - **View Building Infrastructure Data** to assess development and facilities.
-        - **Analyze Weather Trends** that impact agriculture and hydropower.
-        - **Monitor Security Reports** across the GHATZ zone.
-        - **Track Water Levels** in the Gurara reservoir with time-based analysis.
-        - **Understand Staff Composition** to evaluate workforce distribution.
+    # Add a relevant banner image with corrected parameter
+    st.image("https://example.com/ghatz-banner.jpg",
+             use_container_width=True)  # Updated parameter
 
-        ### 📊 Why Use This Platform?
-        - Intuitive interface with **interactive filters**
-        - Dynamic **visualizations and metrics**
-        - Useful for **policy planning, engineering analysis,** and **development tracking**
+    with st.container():
+        st.markdown("""
+        ### 🔍 Core Capabilities
+        <div style="padding:15px; background-color:#f8f9fa; border-radius:10px; margin:10px 0">
+        <div style="column-count:2; column-gap:20px;">
+        <div style="break-inside:avoid;">
+        <h4>🏗️ Infrastructure Monitoring</h4>
+        • Real-time <strong>dam instrumentation</strong> analysis<br>
+        • <strong>Building infrastructure</strong> development tracking<br>
+        • <strong>Water level</strong> historical trends
+        </div>
+        <div style="break-inside:avoid;">
+        <h4>🌦️ Environmental Insights</h4>
+        • Agricultural <strong>weather impact</strong> analysis<br>
+        • Zone-wide <strong>security monitoring</strong><br>
+        • Workforce <strong>staff composition</strong> analytics
+        </div>
+        </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown("""
+    ### 📊 Value Proposition
+    <div style="background-color:#e8f4fc; padding:20px; border-radius:10px; margin:15px 0">
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+    <div style="background:white; padding:15px; border-radius:8px;">
+    <h4>📋 Interactive Dashboards</h4>
+    <span style="font-size:14px">Dynamic filters and parameter controls</span>
+    </div>
+    <div style="background:white; padding:15px; border-radius:8px;">
+    <h4>📈 Advanced Visualizations</h4>
+    <span style="font-size:14px">Time-series charts and geospatial views</span>
+    </div>
+    <div style="background:white; padding:15px; border-radius:8px;">
+    <h4>⚙️ Engineering Tools</h4>
+    <span style="font-size:14px">Technical analysis for infrastructure</span>
+    </div>
+    </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.expander("🚀 Quick Start Guide", expanded=False):
+        st.markdown("""
+        1. **Select a module** from the sidebar  
+        2. **Adjust filters** for your analysis period  
+        3. **Hover/click** visualizations for details  
+        4. **Export** any view using the download buttons  
         """)
+        st.button("📚 View Tutorial", key="tutorial_btn")
+
+    # Feature highlights with updated icons
+    st.markdown("""
+    ### ✨ Key Features
+    <div style="font-size:14px">
+    ▸ Policy-ready reports generation<br>
+    ▸ Mobile-responsive design<br>
+    ▸ Automated data refreshes<br>
+    ▸ Multi-user collaboration
+    </div>
+    """, unsafe_allow_html=True)
 
 elif option == "Data Overview":
     st.write("Here we can display an overview of your data.")
@@ -121,8 +175,12 @@ elif option == "GHATZ Building Infrastructure":
     st.write("Here we can view GHATZ Building Infrastructure Records/History")
 
 elif option == "Dam Instrumentation":
-    st.header("Relief Well Monitoring and Analysis")
-    st.divider()
+    st.header("🌊 Relief Well Monitoring and Analysis")
+    st.markdown("""
+    <div style="background-color:#f0f8ff; padding:15px; border-radius:10px; margin-bottom:20px">
+    Comprehensive monitoring of relief well performance including depth, elevation, and spatial analysis
+    </div>
+    """, unsafe_allow_html=True)
 
     @st.cache_data(ttl=3600)
     def load_relief_well_data():
@@ -130,130 +188,218 @@ elif option == "Dam Instrumentation":
         data = sheet.get_all_records()
         df = pd.DataFrame(data)
 
-        # Convert date column
+        # Convert and clean data
         df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
-        df = df[df['Date'].notna()]
-
-        # Convert numeric columns
-        numeric_cols = ['Depth', 'Elevation']
+        df['Date of Installation'] = pd.to_datetime(df['Date of Installation'], dayfirst=True, errors='coerce')
+        
+        numeric_cols = ['Depth', 'Elevation', 'x', 'y', 'GROUND LEVEL', 'FOUNDATION LEVEL', 
+                       'TOP OF PVC LEVEL', 'TOTAL DEPTH ( m )', 'HEIGHT OF PVC ABOVE G.L', 'NTPL']
+        
         for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col].astype(
-                str).str.replace(',', ''), errors='coerce')
-            df = df[df[col].notna()]
-
-        # Calculate changes
+            df[col] = pd.to_numeric(df[col].astype(str).str.replace(',', ''), errors='coerce')
+        
+        # Calculate metrics
+        df['Days Since Installation'] = (df['Date'] - df['Date of Installation']).dt.days
         df['Depth Change'] = df.groupby('RW_ID')['Depth'].diff()
         df['Elevation Change'] = df.groupby('RW_ID')['Elevation'].diff()
-
-        return df
+        df['Cumulative Depth Change'] = df.groupby('RW_ID')['Depth Change'].cumsum()
+        
+        return df.dropna(subset=['Date'])
 
     try:
         df = load_relief_well_data()
 
-        # Sidebar filters
-        st.sidebar.subheader("Relief Well Filters")
+        # Sidebar filters - expanded
+        st.sidebar.header("🔍 Filter Options")
         well_ids = df['RW_ID'].unique()
-        selected_well = st.sidebar.selectbox("Select Relief Well", well_ids)
-
-        # Date range filter
-        min_date = df['Date'].min().date()
-        max_date = df['Date'].max().date()
+        selected_wells = st.sidebar.multiselect("Select Relief Well(s)", well_ids, default=well_ids[0])
+        
         date_range = st.sidebar.date_input(
             "Date Range",
-            value=[min_date, max_date],
-            min_value=min_date,
-            max_value=max_date
+            value=[df['Date'].min().date(), df['Date'].max().date()],
+            min_value=df['Date'].min().date(),
+            max_value=df['Date'].max().date()
         )
-
-        # Filter data
+        
+        # Main dashboard
         filtered_df = df[
-            (df['RW_ID'] == selected_well) &
+            (df['RW_ID'].isin(selected_wells)) &
             (df['Date'].dt.date >= date_range[0]) &
             (df['Date'].dt.date <= date_range[1])
         ].copy()
+        
+        if filtered_df.empty:
+            st.warning("No data available for selected filters")
+            st.stop()
 
-        # Main dashboard
-        st.subheader(f"Analysis for Relief Well {selected_well}")
-
-        # Key metrics
-        col1, col2, col3 = st.columns(3)
-        col1.metric("First Measurement",
-                    filtered_df['Date'].min().strftime('%Y-%m-%d'))
-        col2.metric("Last Measurement",
-                    filtered_df['Date'].max().strftime('%Y-%m-%d'))
-        col3.metric("Valid Measurements", len(filtered_df))
-
+        # Summary metrics
+        st.subheader("📊 Performance Summary")
+        cols = st.columns(4)
+        cols[0].metric("Selected Wells", len(selected_wells))
+        cols[1].metric("Date Range", f"{date_range[0]} to {date_range[1]}")
+        cols[2].metric("Avg Depth Change", f"{filtered_df['Depth Change'].mean():.2f} m")
+        cols[3].metric("Max Elevation", f"{filtered_df['Elevation'].max():.2f} m")
+        
         st.divider()
 
-        # Visualization tabs
-        tab1, tab2, tab3 = st.tabs(
-            ["Time Series", "Depth Analysis", "Data Table"])
+        # Enhanced visualization tabs
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["📈 Time Trends", "📉 Depth Analysis", "📊 Statistical Summary", "📋 Raw Data"])
 
         with tab1:
-            st.subheader("Time Series Analysis")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("Depth Over Time")
+                fig = px.line(
+                    filtered_df,
+                    x='Date',
+                    y='Depth',
+                    color='RW_ID',
+                    title='Depth Measurements',
+                    labels={'Depth': 'Depth (m)'},
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+            with col2:
+                st.subheader("Elevation Trends")
+                fig = px.area(
+                    filtered_df,
+                    x='Date',
+                    y='Elevation',
+                    color='RW_ID',
+                    title='Elevation Changes',
+                    labels={'Elevation': 'Elevation (m)'},
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("Cumulative Changes")
             fig = px.line(
                 filtered_df,
                 x='Date',
-                y=['Depth', 'Elevation'],
-                title=f'Measurements Over Time - {selected_well}',
-                labels={'value': 'Measurement (m)', 'variable': 'Parameter'},
+                y='Cumulative Depth Change',
+                color='RW_ID',
+                title='Total Depth Change Since First Measurement',
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            # New: Scatter plot of Depth vs Elevation
+            st.subheader("Depth vs Elevation Relationship")
+            fig = px.scatter(
+                filtered_df,
+                x='Depth',
+                y='Elevation',
+                color='RW_ID',
+                # trendline="lowess",
+                hover_data=['Date'],
                 height=500
             )
             st.plotly_chart(fig, use_container_width=True)
 
+        with tab2:
+            st.subheader("Depth Distribution Analysis")
             col1, col2 = st.columns(2)
             with col1:
-                st.subheader("Depth Change (m)")
-                st.line_chart(filtered_df.set_index('Date')['Depth Change'])
+                fig = px.histogram(
+                    filtered_df,
+                    x='Depth',
+                    nbins=20,
+                    color='RW_ID',
+                    title='Depth Measurement Distribution',
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
             with col2:
-                st.subheader("Elevation Change (m)")
-                st.line_chart(filtered_df.set_index(
-                    'Date')['Elevation Change'])
-
-        with tab2:
-            st.subheader("Depth Analysis")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.hist(filtered_df['Depth'], bins=15,
-                    edgecolor='black', color='teal')
-            ax.set_xlabel('Depth (m)')
-            ax.set_ylabel('Frequency')
-            st.pyplot(fig)
-
-            st.subheader("Depth Over Time")
-            chart = alt.Chart(filtered_df).mark_circle(size=60).encode(
-                x='Date',
+                fig = px.box(
+                    filtered_df,
+                    y='Depth',
+                    x='RW_ID',
+                    color='RW_ID',
+                    title='Depth Variation by Well',
+                    height=400
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # New: Violin plot showing distribution
+            st.subheader("Depth Distribution Density")
+            fig = px.violin(
+                filtered_df,
                 y='Depth',
-                tooltip=['Date', 'Depth', 'Elevation']
-            ).interactive()
-            st.altair_chart(chart, use_container_width=True)
+                x='RW_ID',
+                color='RW_ID',
+                box=True,
+                points="all",
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
         with tab3:
-            st.subheader("Measurement Data")
+            st.subheader("Statistical Summary")
             st.dataframe(
-                filtered_df.sort_values('Date', ascending=False)[
-                    ['Date', 'RW_ID', 'Depth', 'Elevation',
-                        'Depth Change', 'Elevation Change']
-                ],
-                column_config={
-                    "Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
-                    "Depth": st.column_config.NumberColumn(format="%.2f m"),
-                    "Elevation": st.column_config.NumberColumn(format="%.2f m")
-                },
-                hide_index=True,
+                filtered_df.groupby('RW_ID').agg({
+                    'Depth': ['mean', 'std', 'min', 'max', 'count'],
+                    'Elevation': ['mean', 'std', 'min', 'max'],
+                    'Days Since Installation': ['max']
+                }).style.format("{:.2f}"),
                 use_container_width=True
             )
+            
+            st.subheader("Change Rate Analysis")
+            change_rates = filtered_df.groupby('RW_ID').apply(
+                lambda x: pd.Series({
+                    'Depth Change Rate (m/day)': x['Depth Change'].mean() / ((x['Date'].max() - x['Date'].min()).days + 1),
+                    'Elevation Change Rate (m/day)': x['Elevation Change'].mean() / ((x['Date'].max() - x['Date'].min()).days + 1),
+                    'Measurement Frequency (days)': ((x['Date'].max() - x['Date'].min()).days + 1) / len(x)
+                })
+            )
+            st.dataframe(change_rates.style.format("{:.4f}"), use_container_width=True)
 
-        # Data export
+            # New: Correlation matrix
+            st.subheader("Parameter Correlations")
+            numeric_df = filtered_df.select_dtypes(include=['float64', 'int64'])
+            corr_matrix = numeric_df.corr()
+            fig = px.imshow(
+                corr_matrix,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale='RdBu',
+                range_color=[-1, 1],
+                height=600
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab4:
+            st.subheader("Measurement Records")
+            st.dataframe(
+                filtered_df.sort_values(['RW_ID', 'Date'], ascending=[True, False]),
+                column_config={
+                    "Date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
+                    "Date of Installation": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
+                    "Depth": st.column_config.NumberColumn(format="%.2f m"),
+                    "Elevation": st.column_config.NumberColumn(format="%.2f m"),
+                    "GROUND LEVEL": st.column_config.NumberColumn(format="%.2f m")
+                },
+                hide_index=True,
+                use_container_width=True,
+                height=600
+            )
+
+        # Enhanced data export
+        st.sidebar.divider()
         st.sidebar.download_button(
-            label="📥 Download Data",
+            label="📥 Export Current View",
             data=filtered_df.to_csv(index=False).encode('utf-8'),
-            file_name=f"relief_well_{selected_well}.csv",
-            mime='text/csv'
+            file_name=f"relief_wells_{date_range[0]}_{date_range[1]}.csv",
+            mime='text/csv',
+            help="Download filtered data as CSV"
         )
 
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
-
+        st.error(f"❌ Data loading error: {str(e)}")
+        st.error("Please check your data connection and filters")
 elif option == "GHATZ Weather":
     st.header("GHATZ Rainfall Analysis - Right and Left Bank")
     st.divider()
