@@ -104,9 +104,6 @@ if option == "Home":
     """)
 
     # Add a relevant banner image with corrected parameter
-    st.image("https://example.com/ghatz-banner.jpg",
-             use_container_width=True)  # Updated parameter
-
     with st.container():
         st.markdown("""
         ### 🔍 Core Capabilities
