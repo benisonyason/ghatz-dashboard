@@ -18,12 +18,12 @@ security_report.csv
 staffcomposition.csv
 standpipedata.csv
 reliefwell_data.csv
-.streamlit/secrets.toml
+# .streamlit/secrets.toml
 *.key
 *.pem
 
 # Streamlit
-.secrets.toml
+# .secrets.toml
 
 # IDE
 .vscode/

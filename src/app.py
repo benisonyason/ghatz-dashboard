@@ -38,7 +38,7 @@ st.set_page_config(
 )
 
 st.markdown(
-    '<style>div.block-container{padding-top:1rem; padding-bottom:0.0rem;}</style>', unsafe_allow_html=True)
+    '<style>div.block-container{padding-top:1rem; padding-bottom:3rem;}</style>', unsafe_allow_html=True)
 st.markdown("""
 <style>
     #MainMenu {visibility: hidden;}
