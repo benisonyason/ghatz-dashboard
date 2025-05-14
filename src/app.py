@@ -398,8 +398,12 @@ elif option == "Dam Instrumentation":
         st.error(f"❌ Data loading error: {str(e)}")
         st.error("Please check your data connection and filters")
 elif option == "GHATZ Weather":
-    st.header("GHATZ Rainfall Analysis - Right and Left Bank")
-    st.divider()
+    st.header("🌧️ GHATZ Rainfall Analysis - Right and Left Bank")
+    st.markdown("""
+    <div style="background-color:#f0f8ff; padding:15px; border-radius:10px; margin-bottom:20px">
+    Comprehensive rainfall monitoring with comparative analysis between banks
+    </div>
+    """, unsafe_allow_html=True)
 
     @st.cache_data(ttl=3600)
     def load_rainfall_data():
@@ -419,46 +423,205 @@ elif option == "GHATZ Weather":
         df["rightbank"] = pd.to_numeric(df["rightbank"], errors="coerce")
         df["leftbank"] = pd.to_numeric(df["leftbank"], errors="coerce")
 
+        # Create time-based features
+        df["year"] = df["date"].dt.year
+        df["month"] = df["date"].dt.month
+        df["month_name"] = df["date"].dt.month_name()
+        df["day_of_year"] = df["date"].dt.dayofyear
+        df["week"] = df["date"].dt.isocalendar().week
+        
         return df
 
     try:
         df = load_rainfall_data()
 
-        # Show data preview
-        st.subheader("Rainfall Data")
-        st.dataframe(df, use_container_width=True)
+        # Sidebar filters
+        st.sidebar.header("🔍 Filter Options")
+        
+        # Date range filter
+        min_date = df["date"].min().date()
+        max_date = df["date"].max().date()
+        date_range = st.sidebar.date_input(
+            "Select Date Range",
+            value=[min_date, max_date],
+            min_value=min_date,
+            max_value=max_date
+        )
+        
+        # Year filter
+        available_years = sorted(df["year"].unique())
+        selected_years = st.sidebar.multiselect(
+            "Select Years",
+            options=available_years,
+            default=available_years
+        )
+        
+        # Bank selection
+        banks = st.sidebar.multiselect(
+            "Select Banks to Compare",
+            options=["rightbank", "leftbank"],
+            default=["rightbank", "leftbank"]
+        )
 
-        # Line chart
-        st.subheader("Daily Rainfall (mm) - Line Chart")
-        st.line_chart(df.set_index("date")[
-                      ["rightbank", "leftbank"]], use_container_width=True)
+        # Apply filters
+        filtered_df = df[
+            (df["date"].dt.date >= date_range[0]) &
+            (df["date"].dt.date <= date_range[1]) &
+            (df["year"].isin(selected_years))
+        ].copy()
 
-        # Monthly Aggregation
-        df["month"] = df["date"].dt.to_period("M").dt.to_timestamp()
-        monthly = df.groupby("month")[
-            ["rightbank", "leftbank"]].sum().reset_index()
+        if filtered_df.empty:
+            st.warning("No data available for selected filters")
+            st.stop()
 
-        st.subheader("Monthly Total Rainfall (mm) - Bar Chart")
-        st.bar_chart(monthly.set_index("month"), use_container_width=True)
+        # Main dashboard
+        st.subheader("📊 Rainfall Overview")
+        cols = st.columns(3)
+        cols[0].metric("Date Range", f"{date_range[0]} to {date_range[1]}")
+        cols[1].metric("Days Recorded", len(filtered_df))
+        cols[2].metric("Years Included", len(selected_years))
+        
+        st.divider()
 
-        # Summary Statistics
-        st.subheader("Summary Statistics")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Right Bank - Total", f"{df['rightbank'].sum():.2f} mm")
-            st.metric("Right Bank - Max", f"{df['rightbank'].max():.2f} mm")
-            st.metric("Right Bank - Mean", f"{df['rightbank'].mean():.2f} mm")
-        with col2:
-            st.metric("Left Bank - Total", f"{df['leftbank'].sum():.2f} mm")
-            st.metric("Left Bank - Max", f"{df['leftbank'].max():.2f} mm")
-            st.metric("Left Bank - Mean", f"{df['leftbank'].mean():.2f} mm")
+        # Visualization tabs
+        tab1, tab2, tab3, tab4 = st.tabs(
+            ["📅 Daily View", "📆 Monthly Analysis", "📈 Annual Trends", "📋 Raw Data"])
+
+        with tab1:
+            st.subheader("Daily Rainfall Comparison")
+            fig = px.line(
+                filtered_df,
+                x="date",
+                y=banks,
+                title="Daily Rainfall (mm)",
+                labels={"value": "Rainfall (mm)", "variable": "Bank"},
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+            st.subheader("Rainfall Distribution")
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = px.histogram(
+                    filtered_df,
+                    x="rightbank",
+                    nbins=30,
+                    title="Right Bank Distribution",
+                    labels={"rightbank": "Rainfall (mm)"}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            with col2:
+                fig = px.histogram(
+                    filtered_df,
+                    x="leftbank",
+                    nbins=30,
+                    title="Left Bank Distribution",
+                    labels={"leftbank": "Rainfall (mm)"}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+        with tab2:
+            # Monthly aggregation
+            monthly = filtered_df.groupby(["year", "month", "month_name"])[banks].sum().reset_index()
+            monthly["month_year"] = monthly["month_name"] + " " + monthly["year"].astype(str)
+            
+            st.subheader("Monthly Rainfall Totals")
+            fig = px.bar(
+                monthly,
+                x="month_year",
+                y=banks,
+                barmode="group",
+                title="Monthly Rainfall Comparison (mm)",
+                labels={"value": "Rainfall (mm)", "variable": "Bank"},
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("Monthly Averages")
+            monthly_avg = filtered_df.groupby("month_name")[banks].mean().reset_index()
+            fig = px.line_polar(
+                monthly_avg,
+                r="rightbank",
+                theta="month_name",
+                line_close=True,
+                title="Seasonal Pattern - Right Bank",
+                height=400
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab3:
+            # Annual analysis
+            annual = filtered_df.groupby("year")[banks].sum().reset_index()
+            
+            st.subheader("Annual Rainfall Totals")
+            fig = px.bar(
+                annual,
+                x="year",
+                y=banks,
+                barmode="group",
+                title="Annual Rainfall Comparison (mm)",
+                labels={"value": "Rainfall (mm)", "variable": "Bank"},
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            st.subheader("Cumulative Rainfall")
+            cumulative = filtered_df.sort_values("date").groupby("year")[banks].cumsum()
+            cumulative["date"] = filtered_df["date"]
+            fig = px.line(
+                cumulative,
+                x="date",
+                y=banks,
+                title="Cumulative Rainfall by Year (mm)",
+                labels={"value": "Cumulative Rainfall (mm)", "variable": "Bank"},
+                height=500
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab4:
+            st.subheader("Rainfall Records")
+            st.dataframe(
+                filtered_df.sort_values("date", ascending=False),
+                column_config={
+                    "date": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
+                    "rightbank": st.column_config.NumberColumn(label="Right Bank (mm)", format="%.1f"),
+                    "leftbank": st.column_config.NumberColumn(label="Left Bank (mm)", format="%.1f")
+                },
+                hide_index=True,
+                use_container_width=True,
+                height=600
+            )
+
+        # Additional metrics
+        st.sidebar.divider()
+        st.sidebar.subheader("Key Metrics")
+        for bank in banks:
+            st.sidebar.metric(
+                f"{bank.title()} - Max Daily",
+                f"{filtered_df[bank].max():.1f} mm"
+            )
+            st.sidebar.metric(
+                f"{bank.title()} - Total",
+                f"{filtered_df[bank].sum():.1f} mm"
+            )
+
+        # Data export
+        st.sidebar.download_button(
+            label="📥 Export Data",
+            data=filtered_df.to_csv(index=False).encode('utf-8'),
+            file_name=f"rainfall_data_{date_range[0]}_{date_range[1]}.csv",
+            mime='text/csv'
+        )
 
     except Exception as e:
         st.error(f"Error loading rainfall data: {str(e)}")
-
 elif option == "GHATZ Security":
-    st.header("GHATZ Security Incident Dashboard")
-    st.divider()
+    st.header("🚨 GHATZ Security Incident Dashboard")
+    st.markdown("""
+    <div style="background-color:#fff8f8; padding:15px; border-radius:10px; margin-bottom:20px">
+    Comprehensive security monitoring and threat analysis for Gurara Dam and surrounding areas
+    </div>
+    """, unsafe_allow_html=True)
 
     @st.cache_data(ttl=3600)
     def load_security_data():
@@ -475,93 +638,169 @@ elif option == "GHATZ Security":
             .fillna(0)
         )
 
-        # Convert dates
-        df['Date'] = pd.to_datetime(
-            df['Date'], errors='coerce', format='mixed')
+        # Clean and standardize text data
+        text_cols = ['Category', 'Sub-Category', 'Details', 'Location']
+        for col in text_cols:
+            if col in df.columns:
+                df[col] = df[col].astype(str).str.strip().str.title()
 
         return df
 
     try:
         security_data = load_security_data()
 
-        # Key metrics
-        st.subheader("Key Security Metrics")
-        col1, col2, col3 = st.columns(3)
+        # Sidebar filters
+        st.sidebar.header("🔍 Filter Options")
 
-        def get_metric(category, sub_category):
+        # Category filter with safe defaults
+        categories = security_data['Category'].dropna().unique().tolist()
+        default_categories = [cat for cat in ["Incident Summary", "Incident Breakdown", "Notable Incidents"] if cat in categories]
+
+        selected_categories = st.sidebar.multiselect(
+            "Select Categories",
+            options=categories,
+            default=default_categories
+        )
+
+        show_impact = st.sidebar.checkbox("Show Impact Analysis", True)
+        show_recommendations = st.sidebar.checkbox("Show Recommendations", True)
+
+        # Filter data
+        filtered_data = security_data[security_data['Category'].isin(selected_categories)].copy()
+
+        st.subheader("📊 Security Metrics Overview")
+
+        def calculate_metric(df, category, sub_category):
             try:
-                value = security_data[
-                    (security_data['Category'] == category) &
-                    (security_data['Sub-Category'] == sub_category)
-                ]['Numeric_Value'].iloc[0]
-                return int(value)
-            except (IndexError, KeyError):
+                subset = df[(df['Category'] == category) & (df['Sub-Category'] == sub_category)]
+                return subset['Numeric_Value'].iloc[0] if not subset.empty else 0
+            except:
                 return 0
 
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Incidents", get_metric(
-                "INCIDENT SUMMARY", "Total Incidents"))
+            total_incidents = calculate_metric(filtered_data, "Incident Summary", "Total Incidents")
+            st.metric("Total Incidents", total_incidents)
+
         with col2:
-            st.metric("Fatalities", get_metric(
-                "INCIDENT SUMMARY", "Fatalities"))
+            fatalities = calculate_metric(filtered_data, "Incident Summary", "Fatalities")
+            st.metric("Fatalities", fatalities)
+
         with col3:
-            st.metric("Abductions", get_metric(
-                "INCIDENT SUMMARY", "Abductions"))
+            abductions = calculate_metric(filtered_data, "Incident Summary", "Abductions")
+            st.metric("Abductions", abductions)
+
+        with col4:
+            fatality_rate = (fatalities / total_incidents * 100) if total_incidents > 0 else 0
+            st.metric("Fatality Rate", f"{fatality_rate:.1f}%")
 
         st.divider()
 
-        # Incident Analysis
-        tab1, tab2, tab3 = st.tabs(["Incident Types", "Timeline", "Locations"])
+        tab1, tab2, tab3, tab4 = st.tabs(["Incident Analysis", "Location Intelligence", "Impact Assessment", "Recommendations"])
 
         with tab1:
-            incident_types = security_data[
-                security_data['Category'] == "INCIDENT BREAKDOWN"
-            ]
-
+            incident_types = filtered_data[filtered_data['Category'] == "Incident Breakdown"]
             if not incident_types.empty:
-                st.subheader("Incident Type Distribution")
-                viz_df = incident_types[['Sub-Category', 'Numeric_Value']].rename(
-                    columns={'Sub-Category': 'Incident Type',
-                             'Numeric_Value': 'Count'}
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.subheader("Incident Composition")
+                    viz_df = incident_types[['Sub-Category', 'Numeric_Value']].rename(
+                        columns={'Sub-Category': 'Incident Type', 'Numeric_Value': 'Count'}
+                    )
+                    fig = px.pie(viz_df, names='Incident Type', values='Count', hole=0.3)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    st.subheader("Incident Severity")
+                    severity_df = viz_df.copy()
+                    severity_df['Percentage'] = (severity_df['Count'] / severity_df['Count'].sum()) * 100
+                    fig = px.bar(severity_df, x='Incident Type', y='Percentage', color='Count', text='Percentage')
+                    fig.update_traces(texttemplate='%{text:.1f}%', textposition='outside')
+                    st.plotly_chart(fig, use_container_width=True)
+
+                st.subheader("Incident Details")
+                st.dataframe(
+                    incident_types[['Sub-Category', 'Details', 'Numeric_Value']].sort_values('Numeric_Value', ascending=False),
+                    column_config={"Numeric_Value": st.column_config.NumberColumn("Count")},
+                    hide_index=True,
+                    use_container_width=True
                 )
 
-                fig = px.pie(viz_df, names='Incident Type',
-                             values='Count', title='Incident Composition')
-                st.plotly_chart(fig, use_container_width=True)
-                st.bar_chart(viz_df.set_index('Incident Type'))
-
         with tab2:
-            notable = security_data[
-                (security_data['Category'] == "NOTABLE INCIDENTS") &
-                (security_data['Date'].notna())
-            ]
+            if 'Location' in filtered_data.columns:
+                loc_data = filtered_data[(filtered_data['Location'].notna()) & (filtered_data['Location'] != '-')]
+                if not loc_data.empty:
+                    col1, col2 = st.columns(2)
 
-            if not notable.empty:
-                st.subheader("Incident Timeline")
-                notable['Month'] = notable['Date'].dt.to_period(
-                    'M').astype(str)
-                monthly_counts = notable.groupby('Month').size()
-                st.line_chart(monthly_counts)
+                    with col1:
+                        st.subheader("Incident Hotspots")
+                        loc_counts = loc_data['Location'].value_counts().reset_index()
+                        fig = px.bar(loc_counts.head(10), x='Location', y='count', color='count', labels={'count': 'Incidents'})
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    with col2:
+                        st.subheader("Location Risk Map")
+                        st.info("Map visualization would appear here with geographic data")
+
+                    st.subheader("Location Details")
+                    location_details = loc_data.groupby('Location').agg({
+                        'Numeric_Value': 'sum',
+                        'Sub-Category': lambda x: ', '.join(set(x))
+                    }).reset_index()
+                    st.dataframe(
+                        location_details.sort_values('Numeric_Value', ascending=False),
+                        column_config={
+                            "Numeric_Value": st.column_config.NumberColumn("Total Incidents"),
+                            "Sub-Category": st.column_config.TextColumn("Incident Types")
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
 
         with tab3:
-            if 'Location' in security_data.columns:
-                st.subheader("Incidents by Location")
-                loc_counts = security_data[security_data['Location'].notna(
-                )]['Location'].value_counts()
-                if not loc_counts.empty:
-                    st.bar_chart(loc_counts)
+            if show_impact:
+                impact_data = security_data[security_data['Category'] == "Impact"]
+                if not impact_data.empty:
+                    st.subheader("Operational Impact Analysis")
+                    for _, row in impact_data.iterrows():
+                        with st.expander(f"🔹 {row['Sub-Category']}"):
+                            st.markdown(f"**Details:** {row['Details']}")
 
-        # Data export
+                measures_data = security_data[security_data['Category'] == "Security Measures"]
+                if not measures_data.empty:
+                    st.subheader("Security Measures Timeline")
+                    measures_df = measures_data[['Sub-Category', 'Details']]
+                    st.dataframe(
+                        measures_df,
+                        column_config={"Sub-Category": "Measure", "Details": "Description"},
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+        with tab4:
+            if show_recommendations:
+                recommendations = security_data[security_data['Category'] == "Recommendations"]
+                if not recommendations.empty:
+                    st.subheader("Security Recommendations")
+                    cols = st.columns(2)
+                    for idx, (_, row) in enumerate(recommendations.iterrows()):
+                        with cols[idx % 2]:
+                            with st.container(border=True):
+                                st.markdown(f"#### {row['Sub-Category']}")
+                                st.markdown(row['Details'])
+                                st.progress(min((idx + 1) * 20, 100), text=f"Priority {idx + 1}")
+
         st.sidebar.download_button(
-            label="📥 Download Security Data",
-            data=security_data.to_csv(index=False).encode('utf-8'),
-            file_name="GHATZ_security_export.csv",
-            mime='text/csv'
+            label="📅 Export Analysis",
+            data=filtered_data.to_csv(index=False).encode('utf-8'),
+            file_name="ghatz_security_analysis.csv",
+            mime='text/csv',
+            help="Export filtered data with all analysis"
         )
 
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
-
+        st.error(f"⚠️ Error processing data: {str(e)}")
 elif option == "GHATZ Water Level":
     st.header("Gurara Reservoir Water Level - Yearly and Monthly Analysis")
     st.divider()
