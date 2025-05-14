@@ -19,7 +19,6 @@ from google.oauth2 import service_account
 from datetime import datetime
 import altair as alt
 import matplotlib.pyplot as plt
-import warnings
 
 current_year = datetime.now().year
 
@@ -356,29 +355,79 @@ elif option == "GHATZ Building Structures":
             else:
                 st.warning("No geospatial data available for the selected filters")
         
-        with tab3:
-            st.header("Building Details")
-            
-            # Search functionality
-            search_query = st.text_input("🔍 Search buildings by name")
-            if search_query:
-                display_df = filtered_df[
-                    filtered_df['name_Building'].str.contains(search_query, case=False, na=False)
-                ]
-            else:
-                display_df = filtered_df
-            
-            # Show data table
-            st.dataframe(
-                display_df[[
-                    'name_Building', 'typeBuilding', 'location', 
-                    'generalcomments', 'final_comment', 'date',
-                    'latitude', 'longitude'
-                ]].sort_values('date', ascending=False),
-                use_container_width=True,
-                height=600
-            )
-        
+            with tab3:
+                st.header("Building Details")
+                
+                # Search functionality
+                search_query = st.text_input("🔍 Search buildings by name")
+                if search_query:
+                    display_df = filtered_df[
+                        filtered_df['name_Building'].str.contains(search_query, case=False, na=False)
+                    ]
+                else:
+                    display_df = filtered_df.copy()
+                
+                # Display the dataframe without image_url (we'll handle images separately)
+                st.dataframe(
+                    display_df[[
+                        'name_Building', 'typeBuilding', 'location', 
+                        'generalcomments', 'final_comment', 'date',
+                        'latitude', 'longitude'
+                    ]].sort_values('date', ascending=False),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Image viewer section
+                st.subheader("Image Viewer")
+                
+                if not display_df.empty:
+                    # Create session state to track current image index if it doesn't exist
+                    if 'current_img_idx' not in st.session_state:
+                        st.session_state.current_img_idx = 0
+                    
+                    # Get all rows with valid image URLs
+                    image_rows = display_df[pd.notna(display_df['image_url'])].reset_index(drop=True)
+                    
+                    if len(image_rows) > 0:
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        
+                        with col1:
+                            if st.button("⏮️ Previous") and st.session_state.current_img_idx > 0:
+                                st.session_state.current_img_idx -= 1
+                        
+                        with col3:
+                            if st.button("⏭️ Next") and st.session_state.current_img_idx < len(image_rows) - 1:
+                                st.session_state.current_img_idx += 1
+                        
+                        with col2:
+                            current_row = image_rows.iloc[st.session_state.current_img_idx]
+                            st.markdown(f"**{current_row['name_Building']}**")
+                            st.caption(f"Image {st.session_state.current_img_idx + 1} of {len(image_rows)}")
+                            
+                            try:
+                                response = requests.get(current_row['image_url'], timeout=10)
+                                img = Image.open(BytesIO(response.content))
+                                st.image(img, use_column_width=True)
+                                
+                                # Display image URL as clickable link
+                                st.markdown(f"[📎 Open Image URL]({current_row['image_url']})", unsafe_allow_html=True)
+                            except Exception as e:
+                                st.warning(f"Couldn't load image: {str(e)}")
+                        
+                        # Display current building info
+                        with st.expander("📝 Building Details"):
+                            st.write(f"**Name:** {current_row['name_Building']}")
+                            st.write(f"**Type:** {current_row['typeBuilding']}")
+                            st.write(f"**Location:** {current_row['location']}")
+                            st.write(f"**Condition:** {current_row['generalcomments']}")
+                            st.write(f"**Date:** {current_row['date'].strftime('%Y-%m-%d')}")
+                            st.write(f"**Coordinates:** {current_row['latitude']}, {current_row['longitude']}")
+                            st.write(f"**Comments:** {current_row['final_comment']}")
+                    else:
+                        st.warning("No images available for these buildings")
+                else:
+                    st.warning("No buildings match your search criteria")        
             with tab4:
                 st.header("Image Gallery")
                 
