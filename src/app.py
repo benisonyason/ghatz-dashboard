@@ -6,7 +6,7 @@ import altair as alt
 import matplotlib.pyplot as plt
 import plotly.express as px
 from utils.gsheets import connect_to_gsheet
-
+import calendar
 
 current_year = datetime.now().year
 
@@ -86,7 +86,7 @@ st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
     "Choose Data to visualization:",
     [
-        "Home", "Data Overview", "Dam Instrumentation", "GHATZ Building Infrastructure",
+        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Building Infrastructure",
         "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
     ]
 )
@@ -165,7 +165,7 @@ if option == "Home":
     </div>
     """, unsafe_allow_html=True)
 
-elif option == "Data Overview":
+elif option == "GHATZ Area Map":
     st.write("Here we can display an overview of your data.")
 
 elif option == "GHATZ Building Infrastructure":
@@ -802,8 +802,12 @@ elif option == "GHATZ Security":
     except Exception as e:
         st.error(f"⚠️ Error processing data: {str(e)}")
 elif option == "GHATZ Water Level":
-    st.header("Gurara Reservoir Water Level - Yearly and Monthly Analysis")
-    st.divider()
+    st.header("🌊 Gurara Reservoir Water Level Analysis")
+    st.markdown("""
+    <div style="background-color:#e6f3ff; padding:15px; border-radius:10px; margin-bottom:20px">
+    Comprehensive monitoring and analysis of reservoir water levels with historical trends and anomaly detection
+    </div>
+    """, unsafe_allow_html=True)
 
     @st.cache_data(ttl=3600)
     def load_water_level_data():
@@ -811,88 +815,206 @@ elif option == "GHATZ Water Level":
         records = sheet.get_all_records()
         df = pd.DataFrame(records)
 
-        # Parse dates and remove invalid ones
-        df["date"] = pd.to_datetime(df["date"], errors='coerce')
+        # Robust date parsing with dayfirst=True for DD/MM/YYYY format
+        df["date"] = pd.to_datetime(df["date"], dayfirst=True, errors='coerce')
         df = df.dropna(subset=["date"])
 
-        # Convert reservoir_level to numeric
-        df["reservoir_level"] = pd.to_numeric(
-            df["reservoir_level"], errors='coerce')
+        # Convert and clean water level data
+        df["reservoir_level"] = pd.to_numeric(df["reservoir_level"], errors='coerce')
         df = df.dropna(subset=["reservoir_level"])
-
-        return df
+        
+        # Extract temporal features
+        df["year"] = df["date"].dt.year
+        df["month"] = df["date"].dt.month
+        df["month_name"] = df["date"].dt.month_name()
+        df["day_of_year"] = df["date"].dt.dayofyear
+        df["quarter"] = df["date"].dt.quarter
+        
+        return df.sort_values("date")
 
     try:
         df = load_water_level_data()
+        
+        # Calculate overall stats for reference
+        min_level, max_level = df["reservoir_level"].min(), df["reservoir_level"].max()
+        avg_level = df["reservoir_level"].mean()
 
-        # Date range selection
-        startDate = df["date"].min()
-        endDate = min(df["date"].max(), pd.to_datetime("2025-12-31"))
-
-        col1, col2 = st.columns((2))
-        with col1:
-            date1 = pd.to_datetime(st.date_input(
-                "Start Date", startDate, min_value=startDate, max_value=endDate))
-        with col2:
-            date2 = pd.to_datetime(st.date_input(
-                "End Date", endDate, min_value=startDate, max_value=endDate))
-
-        # Filter based on selected range
-        df_filtered = df[(df["date"] >= date1) & (df["date"] <= date2)].copy()
-
+        # Sidebar controls
+        st.sidebar.header("🔧 Analysis Controls")
+        analysis_years = st.sidebar.multiselect(
+            "Select Years",
+            options=sorted(df["year"].unique()),
+            default=sorted(df["year"].unique())
+        )
+        
+        show_anomalies = st.sidebar.checkbox("Show Anomaly Detection", True)
+        show_histogram = st.sidebar.checkbox("Show Distribution Analysis", True)
+        
+        # Filter data based on selected years
+        df_filtered = df[df["year"].isin(analysis_years)] if analysis_years else df
+        
         if df_filtered.empty:
-            st.warning("No data available for the selected date range")
+            st.warning("No data available for the selected filters")
             st.stop()
 
-        # Yearly Analysis
-        df_filtered["year"] = df_filtered["date"].dt.year
-        yearly_avg = df_filtered.groupby(
-            "year")["reservoir_level"].mean().reset_index()
-        yearly_avg = yearly_avg[yearly_avg["year"] <= 2025]
+        # Key metrics
+        st.subheader("📊 Water Level Metrics")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Current Level", 
+                     f"{df_filtered['reservoir_level'].iloc[-1]:.2f} m",
+                     help="Most recent measurement")
+        with col2:
+            st.metric("Historical Avg", 
+                     f"{avg_level:.2f} m",
+                     delta=f"{(df_filtered['reservoir_level'].iloc[-1] - avg_level):.2f} m")
+        with col3:
+            st.metric("Minimum Recorded", 
+                     f"{min_level:.2f} m")
+        with col4:
+            st.metric("Maximum Recorded", 
+                     f"{max_level:.2f} m")
 
-        st.subheader("Average Reservoir Water Level per Year")
+        st.divider()
 
-        if not yearly_avg.empty:
-            yearly_chart = alt.Chart(yearly_avg).mark_line(point=True).encode(
-                x=alt.X("year:O", title="Year"),
-                y=alt.Y("reservoir_level:Q", title="Avg Reservoir Level",
-                        scale=alt.Scale(domain=[600, 630])),
-                tooltip=["year", alt.Tooltip(
-                    "reservoir_level:Q", title="Level", format=".2f")]
+        # Main analysis tabs
+        tab1, tab2, tab3, tab4 = st.tabs(["📈 Temporal Trends", "🌦 Seasonal Patterns", "📉 Anomaly Detection", "📋 Raw Data"])
+
+        with tab1:
+            st.subheader("Water Level Timeline")
+            
+            # Interactive time series plot
+            line_chart = alt.Chart(df_filtered).mark_line(
+                point=True,
+                interpolate='monotone'
+            ).encode(
+                x=alt.X('date:T', title='Date'),
+                y=alt.Y('reservoir_level:Q', 
+                        title='Water Level (m)',
+                        scale=alt.Scale(domain=[min_level-1, max_level+1])),
+                tooltip=[
+                    alt.Tooltip('date:T', title='Date', format='%d %b %Y'),
+                    alt.Tooltip('reservoir_level:Q', title='Level', format='.2f')
+                ]
             ).properties(
-                width="container",
-                height=400,
-                title="Average Reservoir Water Level per Year (600–630m Range)"
+                width='container',
+                height=500
             )
-            st.altair_chart(yearly_chart, use_container_width=True)
+            st.altair_chart(line_chart, use_container_width=True)
+            
+            # Rolling average analysis
+            st.subheader("30-Day Rolling Average")
+            rolling_df = df_filtered.set_index('date')['reservoir_level'].rolling(30).mean().reset_index()
+            rolling_chart = alt.Chart(rolling_df.dropna()).mark_area(
+                line={'color':'darkblue'},
+                color=alt.Gradient(
+                    gradient='linear',
+                    stops=[alt.GradientStop(color='white', offset=0),
+                           alt.GradientStop(color='lightblue', offset=1)],
+                    x1=1, x2=1, y1=1, y2=0
+                )
+            ).encode(
+                x='date:T',
+                y='reservoir_level:Q'
+            )
+            st.altair_chart(rolling_chart, use_container_width=True)
 
-        # Monthly Analysis
-        st.subheader("Average Reservoir Water Level per Month")
-        df_filtered["month"] = df_filtered["date"].dt.strftime("%B")
-        df_filtered["month_num"] = df_filtered["date"].dt.month
-
-        monthly_avg = df_filtered.groupby(["month", "month_num"])[
-            "reservoir_level"].mean().reset_index()
-        monthly_avg = monthly_avg.sort_values("month_num")
-
-        if not monthly_avg.empty:
+        with tab2:
+            st.subheader("Seasonal Patterns")
+            
+            # Monthly analysis
+            monthly_avg = df_filtered.groupby(['month', 'month_name'])['reservoir_level'].mean().reset_index()
+            monthly_avg = monthly_avg.sort_values('month')
+            
             monthly_chart = alt.Chart(monthly_avg).mark_bar().encode(
-                x=alt.X("month:N", sort=list(
-                    monthly_avg["month"]), title="Month"),
-                y=alt.Y("reservoir_level:Q", title="Avg Reservoir Level",
-                        scale=alt.Scale(domain=[600, 630])),
-                tooltip=["month", alt.Tooltip(
-                    "reservoir_level:Q", title="Level", format=".2f")]
+            x=alt.X('month_name:N', sort=list(calendar.month_name[1:]), title="Month"),
+            y=alt.Y('reservoir_level:Q', title='Average Level (m)'),
+            color=alt.Color('reservoir_level:Q', scale=alt.Scale(scheme='blues')),
+            tooltip=['month_name', alt.Tooltip('reservoir_level:Q', format='.2f')]
             ).properties(
-                width="container",
-                height=400,
-                title="Average Reservoir Water Level per Month (600–630m Range)"
+                width='container',
+                height=400
             )
+
             st.altair_chart(monthly_chart, use_container_width=True)
+            
+            # Heatmap by year-month
+            st.subheader("Year-Month Heatmap")
+            heatmap_data = df_filtered.groupby(['year', 'month_name'])['reservoir_level'].mean().unstack()
+            fig = px.imshow(
+                heatmap_data,
+                labels=dict(x="Month", y="Year", color="Water Level"),
+                color_continuous_scale='Blues'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        with tab3:
+            if show_anomalies:
+                st.subheader("Anomaly Detection")
+                
+                # Calculate z-scores for anomaly detection
+                df_filtered['z_score'] = (df_filtered['reservoir_level'] - df_filtered['reservoir_level'].mean()) / df_filtered['reservoir_level'].std()
+                anomalies = df_filtered[abs(df_filtered['z_score']) > 2.5]
+                
+                if not anomalies.empty:
+                    # Anomaly timeline
+                    base = alt.Chart(df_filtered).mark_line(color='lightblue').encode(
+                        x='date:T',
+                        y='reservoir_level:Q'
+                    )
+                    
+                    points = alt.Chart(anomalies).mark_point(
+                        color='red',
+                        size=100
+                    ).encode(
+                        x='date:T',
+                        y='reservoir_level:Q',
+                        tooltip=[
+                            alt.Tooltip('date:T', format='%d %b %Y'),
+                            alt.Tooltip('reservoir_level:Q', format='.2f')
+                        ]
+                    )
+                    
+                    st.altair_chart(base + points, use_container_width=True)
+                    
+                    # Anomaly details table
+                    st.subheader("Anomaly Details")
+                    st.dataframe(
+                        anomalies.sort_values('z_score', ascending=False)[['date', 'reservoir_level', 'z_score']],
+                        column_config={
+                            "date": st.column_config.DatetimeColumn(format="DD/MM/YYYY"),
+                            "reservoir_level": st.column_config.NumberColumn(format="%.2f m"),
+                            "z_score": st.column_config.NumberColumn(
+                                "Deviation Score",
+                                help="Standard deviations from mean")
+                        },
+                        hide_index=True
+                    )
+                else:
+                    st.info("No significant anomalies detected in selected data range")
+
+        with tab4:
+            st.subheader("Raw Measurement Data")
+            st.dataframe(
+                df_filtered.sort_values('date', ascending=False),
+                column_config={
+                    "date": st.column_config.DatetimeColumn(format="DD/MM/YYYY"),
+                    "reservoir_level": st.column_config.NumberColumn(format="%.2f m")
+                },
+                hide_index=True,
+                use_container_width=True
+            )
+
+        # Data export
+        st.sidebar.download_button(
+            label="📥 Export Water Level Data",
+            data=df_filtered.to_csv(index=False).encode('utf-8'),
+            file_name=f"gurara_reservoir_levels_{min(analysis_years)}_{max(analysis_years)}.csv",
+            mime='text/csv'
+        )
 
     except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
-
+        st.error(f"⚠️ Error processing water level data: {str(e)}")
 elif option == "GHATZ Staff Composition":
     st.header("Staff Composition Overview")
     st.divider()
