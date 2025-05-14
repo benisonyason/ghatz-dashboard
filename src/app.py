@@ -98,7 +98,7 @@ st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
     "Choose Data to visualization:",
     [
-        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Building Structures",
+        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities","GHATZ Building Structures",
         "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
     ]
 )
@@ -179,7 +179,309 @@ if option == "Home":
 
 elif option == "GHATZ Area Map":
     st.write("Here we can display an overview of your data.")
+elif option == "GHATZ Facilities":
+        # Default camp coordinates
+        CAMP_COORDINATES = {
+            "Gurara Camp": {"lat": 9.65, "lon": 7.72},
+            "Jere Camp": {"lat": 9.54, "lon": 7.50}
+        }
 
+        # Load data from Google Sheets
+        @st.cache_data(ttl=3600)
+        def load_data():
+            try:
+                sheet = client.open("GHATZ_Data").worksheet("buildings_items")
+                data = sheet.get_all_records()
+                df = pd.DataFrame(data)
+                
+                # Clean and convert data
+                numeric_cols = ['quantity']
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Standardize condition status
+                df['condition_status'] = df['condition_status'].str.strip().str.title()
+                
+                # Add default coordinates based on camp
+                df['latitude'] = df['Camp'].map(lambda x: CAMP_COORDINATES.get(x, {}).get('lat'))
+                df['longitude'] = df['Camp'].map(lambda x: CAMP_COORDINATES.get(x, {}).get('lon'))
+                
+                return df
+            
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
+
+        # Load the data
+        df = load_data()
+
+        # Title and description
+        st.title("🏗️ GHATZ Building Facilities Analysis")
+        st.markdown("""
+        Comprehensive analysis of facility conditions across GHATZ camps with geospatial visualization.
+        """)
+
+        # Sidebar filters
+        with st.sidebar:
+            st.header("🔍 Filters")
+            
+            selected_camp = st.multiselect(
+                "Select Camp(s)",
+                options=sorted(df['Camp'].unique()),
+                default=sorted(df['Camp'].unique())
+            )
+            
+            selected_facility = st.selectbox(
+                "Select Facility Type",
+                ['All'] + sorted(df['building_details'].unique().tolist())
+            )
+            
+            selected_condition = st.multiselect(
+                "Select Condition(s)",
+                options=sorted(df['condition_status'].unique().tolist()),
+                default=sorted(df['condition_status'].unique().tolist())
+            )
+            
+            building_type = st.multiselect(
+                "Select Building Type(s)",
+                options=sorted(df['buildingType'].unique().tolist()),
+                default=sorted(df['buildingType'].unique().tolist())
+            )
+
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_camp:
+            filtered_df = filtered_df[filtered_df['Camp'].isin(selected_camp)]
+        if selected_facility != 'All':
+            filtered_df = filtered_df[filtered_df['building_details'] == selected_facility]
+        if selected_condition:
+            filtered_df = filtered_df[filtered_df['condition_status'].isin(selected_condition)]
+        if building_type:
+            filtered_df = filtered_df[filtered_df['buildingType'].isin(building_type)]
+
+        # Main content
+        st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+
+        # Metrics row
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Facilities", len(filtered_df))
+        col2.metric("Camps Represented", filtered_df['Camp'].nunique())
+        col3.metric("Facility Types", filtered_df['building_details'].nunique())
+        col4.metric("Total Quantity", int(filtered_df['quantity'].sum()))
+
+        # Tabs
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📊 Overview", "🏢 By Facility", "🏛️ By Building", "🗺️ Geospatial", "📝 Details"
+        ])
+
+        with tab1:
+            st.header("Overall Condition Analysis")
+            
+            # Condition distribution
+            fig = px.pie(
+                filtered_df.groupby('condition_status').size().reset_index(name='count'),
+                names='condition_status',
+                values='count',
+                hole=0.3,
+                title='Facility Condition Distribution',
+                color='condition_status',
+                color_discrete_map={
+                    'Critical': 'red',
+                    'Poor': 'orange',
+                    'Fair': 'yellow',
+                    'Good': 'lightgreen',
+                    'Excellent': 'darkgreen'
+                }
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Condition by camp
+            st.subheader("Condition by Camp")
+            camp_data = filtered_df.groupby(['Camp', 'condition_status']).size().unstack().fillna(0)
+            st.bar_chart(camp_data)
+
+        with tab2:
+            st.header("Facility Type Analysis")
+            
+            # Facility condition breakdown
+            fig = px.bar(
+                filtered_df.groupby(['building_details', 'condition_status']).size().reset_index(name='count'),
+                x='building_details',
+                y='count',
+                color='condition_status',
+                title='Condition by Facility Type',
+                labels={'building_details': 'Facility Type', 'count': 'Number of Items'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Quantity by facility
+            st.subheader("Total Quantity by Facility")
+            quantity_data = filtered_df.groupby('building_details')['quantity'].sum().sort_values(ascending=False)
+            st.bar_chart(quantity_data)
+
+        with tab3:
+            st.header("Building Type Analysis")
+            
+            # Building type condition
+            fig = px.sunburst(
+                filtered_df,
+                path=['buildingType', 'condition_status'],
+                values='quantity',
+                title='Condition Distribution by Building Type'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Problem facilities by building type
+            st.subheader("Critical/Poor Facilities by Building Type")
+            critical_df = filtered_df[filtered_df['condition_status'].isin(['Critical', 'Poor'])]
+            if not critical_df.empty:
+                fig = px.treemap(
+                    critical_df,
+                    path=['buildingType', 'building_details'],
+                    values='quantity',
+                    color='condition_status',
+                    color_discrete_map={'Critical': 'red', 'Poor': 'orange'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No Critical/Poor facilities for current filters")
+
+        with tab4:
+            st.header("Geospatial View")
+            
+            if not filtered_df.empty:
+                # Create base map centered between the two camps
+                avg_lat = sum(coord['lat'] for coord in CAMP_COORDINATES.values()) / len(CAMP_COORDINATES)
+                avg_lon = sum(coord['lon'] for coord in CAMP_COORDINATES.values()) / len(CAMP_COORDINATES)
+                m = folium.Map(location=[avg_lat, avg_lon], zoom_start=9)
+                
+                # Add camp location markers
+                for camp_name, coords in CAMP_COORDINATES.items():
+                    if camp_name in selected_camp or not selected_camp:
+                        # Get camp-specific data
+                        camp_data = filtered_df[filtered_df['Camp'] == camp_name]
+                        condition_summary = camp_data['condition_status'].value_counts().to_dict()
+                        
+                        # Create popup content
+                        popup_content = f"""
+                        <h4>{camp_name}</h4>
+                        <b>Total Facilities:</b> {len(camp_data)}<br>
+                        <b>Critical:</b> {condition_summary.get('Critical', 0)}<br>
+                        <b>Poor:</b> {condition_summary.get('Poor', 0)}<br>
+                        <b>Fair:</b> {condition_summary.get('Fair', 0)}<br>
+                        <b>Good:</b> {condition_summary.get('Good', 0)}<br>
+                        <b>Excellent:</b> {condition_summary.get('Excellent', 0)}
+                        """
+                        
+                        folium.Marker(
+                            [coords['lat'], coords['lon']],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=f"Click for {camp_name} details",
+                            icon=folium.Icon(color='blue', icon='info-sign')
+                        ).add_to(m)
+                
+                # Add facility condition circles around each camp
+                for camp_name, coords in CAMP_COORDINATES.items():
+                    if camp_name in selected_camp or not selected_camp:
+                        camp_data = filtered_df[filtered_df['Camp'] == camp_name]
+                        
+                        # Add circle for each condition status
+                        condition_colors = {
+                            'Critical': 'red',
+                            'Poor': 'orange',
+                            'Fair': 'yellow',
+                            'Good': 'lightgreen',
+                            'Excellent': 'darkgreen'
+                        }
+                        
+                        for condition, color in condition_colors.items():
+                            condition_count = len(camp_data[camp_data['condition_status'] == condition])
+                            if condition_count > 0:
+                                radius = condition_count * 100  # Adjust multiplier as needed
+                                folium.Circle(
+                                    location=[coords['lat'], coords['lon']],
+                                    radius=radius,
+                                    color=color,
+                                    fill=True,
+                                    fill_color=color,
+                                    fill_opacity=0.4,
+                                    popup=f"{condition}: {condition_count} facilities"
+                                ).add_to(m)
+                
+                # Display the map
+                folium_static(m, width=1200, height=600)
+                
+                # Add summary statistics
+                st.subheader("Geospatial Summary")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("**Facilities by Camp**")
+                    camp_counts = filtered_df['Camp'].value_counts()
+                    st.bar_chart(camp_counts)
+                
+                with col2:
+                    st.markdown("**Condition Distribution**")
+                    condition_dist = filtered_df['condition_status'].value_counts()
+                    st.bar_chart(condition_dist)
+            else:
+                st.warning("No data available for the selected filters")
+
+        with tab5:
+            st.header("Detailed Facility View")
+            
+            # Search functionality
+            search_query = st.text_input("🔍 Search facility comments")
+            if search_query:
+                detailed_df = filtered_df[
+                    filtered_df['item_comment'].str.contains(search_query, case=False, na=False)
+                ]
+            else:
+                detailed_df = filtered_df
+            
+            # Show data table
+            st.dataframe(
+                detailed_df[[
+                    'building_details', 'quantity', 'condition_status',
+                    'item_comment', 'Camp', 'buildingType'
+                ]].sort_values(['condition_status', 'quantity'], ascending=[True, False]),
+                column_config={
+                    "building_details": "Facility",
+                    "quantity": "Qty",
+                    "condition_status": "Condition",
+                    "item_comment": "Comments",
+                    "Camp": "Camp",
+                    "buildingType": "Building Type"
+                },
+                use_container_width=True,
+                height=600,
+                hide_index=True
+            )
+
+        # Download button
+        csv = filtered_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Download Filtered Data",
+            data=csv,
+            file_name='ghatz_facilities.csv',
+            mime='text/csv'
+        )
+
+        # Footer
+        st.markdown("---")
+        st.caption("GHATZ Facilities Analysis Dashboard - Last updated: 2023")
+
+        # Add conditional formatting explanation
+        with st.expander("ℹ️ Condition Status Definitions"):
+            st.markdown("""
+            - **Critical**: Immediate replacement needed
+            - **Poor**: Significant repairs required
+            - **Fair**: Functional but needs attention
+            - **Good**: Fully functional, minor wear
+            - **Excellent**: Like-new condition
+            """)
 elif option == "GHATZ Building Structures":
     @st.cache_data(ttl=3600)
     def load_building_data():
