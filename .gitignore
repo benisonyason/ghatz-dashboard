@@ -18,6 +18,14 @@ security_report.csv
 staffcomposition.csv
 standpipedata.csv
 reliefwell_data.csv
+airvalves.csv
+buildings_.csv
+buildings_.xlsx
+buildings_items.csv
+centerPivot.csv
+machineries.csv
+standpipedata.csv
+
 # .streamlit/secrets.toml
 *.key
 *.pem

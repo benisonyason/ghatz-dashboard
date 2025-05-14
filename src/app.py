@@ -7,6 +7,19 @@ import matplotlib.pyplot as plt
 import plotly.express as px
 from utils.gsheets import connect_to_gsheet
 import calendar
+import numpy as np
+import plotly.express as px
+import folium
+from streamlit_folium import folium_static
+from PIL import Image
+import requests
+from io import BytesIO
+import gspread
+from google.oauth2 import service_account
+from datetime import datetime
+import altair as alt
+import matplotlib.pyplot as plt
+import warnings
 
 current_year = datetime.now().year
 
@@ -86,7 +99,7 @@ st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
     "Choose Data to visualization:",
     [
-        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Building Infrastructure",
+        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Building Structures",
         "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
     ]
 )
@@ -168,9 +181,239 @@ if option == "Home":
 elif option == "GHATZ Area Map":
     st.write("Here we can display an overview of your data.")
 
-elif option == "GHATZ Building Infrastructure":
-    st.write("Here we can view GHATZ Building Infrastructure Records/History")
+elif option == "GHATZ Building Structures":
+    @st.cache_data(ttl=3600)
+    def load_building_data():
+        try:
+            sheet = client.open("GHATZ_Data").worksheet("buildings_")
+            data = sheet.get_all_records()
+            df = pd.DataFrame(data)
+            
+            # Convert and clean data
+            df['date'] = pd.to_datetime(df['date'], dayfirst=True, errors='coerce')
+            
+            # Handle numeric columns
+            numeric_cols = ['latitude', 'longitude', 'altitude']
+            for col in numeric_cols:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+            return df
+        
+        except Exception as e:
+            st.error(f"Error loading data: {str(e)}")
+            return pd.DataFrame()
 
+    # Display image with error handling
+    def display_image_from_url(url):
+        try:
+            if pd.notna(url):
+                response = requests.get(url, timeout=5)
+                response.raise_for_status()
+                img = Image.open(BytesIO(response.content))
+                st.image(img, caption='Building Image', use_column_width=True)
+        except Exception as e:
+            st.warning(f"Couldn't load image: {str(e)}")
+
+    # Main app function
+    def main():
+        st.title("🏗️ GHATZ Camp Building Structures Analysis")
+        st.markdown("### Comprehensive analysis of building infrastructure across GHATZ camps")
+        
+        # Load data
+        df = load_building_data()
+        
+        if df.empty:
+            st.warning("No data loaded. Please check your connection.")
+            return
+        
+        # Data preparation
+        df['year_month'] = df['date'].dt.to_period('M').astype(str)
+        df['condition_category'] = df['generalcomments'].str.extract(r'(Severe|Moderate|Slight|Good|Extreme)')[0]
+        
+        # Sidebar filters
+        with st.sidebar:
+            st.header("🔍 Filters")
+            selected_camp = st.selectbox(
+                "Select Camp", 
+                ['All'] + sorted(df['location'].unique()),
+                index=0
+            )
+            
+            selected_condition = st.selectbox(
+                "Select Condition", 
+                ['All'] + sorted(df['generalcomments'].dropna().unique()),
+                index=0
+            )
+            
+            selected_type = st.multiselect(
+                "Select Building Type(s)",
+                options=sorted(df['typeBuilding'].dropna().unique()),
+                default=[]
+            )
+            
+            date_range = st.date_input(
+                "Date Range",
+                value=[df['date'].min(), df['date'].max()],
+                min_value=df['date'].min(),
+                max_value=df['date'].max()
+            )
+        
+        # Apply filters
+        filtered_df = df.copy()
+        if selected_camp != 'All':
+            filtered_df = filtered_df[filtered_df['location'] == selected_camp]
+        if selected_condition != 'All':
+            filtered_df = filtered_df[filtered_df['generalcomments'] == selected_condition]
+        if selected_type:
+            filtered_df = filtered_df[filtered_df['typeBuilding'].isin(selected_type)]
+        if len(date_range) == 2:
+            filtered_df = filtered_df[
+                (filtered_df['date'].dt.date >= date_range[0]) & 
+                (filtered_df['date'].dt.date <= date_range[1])
+            ]
+
+        # Main content
+        st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+        
+        # Tabs layout
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📈 Overview Dashboard", 
+            "🗺️ Geospatial View", 
+            "🏢 Building Details", 
+            "🖼️ Image Gallery"
+        ])
+        
+        with tab1:
+            st.header("Overview Dashboard")
+            
+            # Metrics row
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Buildings", len(filtered_df))
+            col2.metric("Camps Represented", filtered_df['location'].nunique())
+            col3.metric("Building Types", filtered_df['typeBuilding'].nunique())
+            col4.metric("Date Range", 
+                    f"{filtered_df['date'].min().strftime('%Y-%m-%d')} to {filtered_df['date'].max().strftime('%Y-%m-%d')}")
+            
+            # Condition distribution - FIXED VERSION
+            st.subheader("Condition Distribution")
+            condition_counts = filtered_df['condition_category'].value_counts().reset_index()
+            condition_counts.columns = ['condition', 'count']  # Proper column naming
+            
+            fig = px.pie(
+                condition_counts,
+                names='condition',
+                values='count',
+                hole=0.3,
+                title='Building Condition Distribution'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Time series analysis
+            st.subheader("Assessments Over Time")
+            time_series = filtered_df.groupby(['year_month', 'condition_category']).size().unstack().fillna(0)
+            st.area_chart(time_series)        
+        with tab2:
+            st.header("Geospatial View")
+            
+            if not filtered_df[['latitude', 'longitude']].dropna().empty:
+                # Create map
+                map_center = [
+                    filtered_df['latitude'].mean(),
+                    filtered_df['longitude'].mean()
+                ]
+                m = folium.Map(location=map_center, zoom_start=10)
+                
+                # Add markers
+                for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
+                    popup_content = f"""
+                    <b>Name:</b> {row['name_Building']}<br>
+                    <b>Type:</b> {row['typeBuilding']}<br>
+                    <b>Condition:</b> {row['generalcomments']}<br>
+                    <b>Last Assessed:</b> {row['date'].strftime('%Y-%m-%d')}
+                    """
+                    if pd.notna(row['image_url']):
+                        popup_content += f"<br><a href='{row['image_url']}' target='_blank'>View Image</a>"
+                    
+                    # Color coding by condition
+                    color_map = {
+                        'Extreme': 'black',
+                        'Severe': 'red',
+                        'Moderate': 'orange',
+                        'Slight': 'beige',
+                        'Good': 'green'
+                    }
+                    color = color_map.get(row['condition_category'], 'gray')
+                    
+                    folium.Marker(
+                        [row['latitude'], row['longitude']],
+                        popup=folium.Popup(popup_content, max_width=300),
+                        tooltip=row['name_Building'],
+                        icon=folium.Icon(color=color, icon='building', prefix='fa')
+                    ).add_to(m)
+                
+                folium_static(m, width=1200, height=600)
+            else:
+                st.warning("No geospatial data available for the selected filters")
+        
+        with tab3:
+            st.header("Building Details")
+            
+            # Search functionality
+            search_query = st.text_input("🔍 Search buildings by name")
+            if search_query:
+                display_df = filtered_df[
+                    filtered_df['name_Building'].str.contains(search_query, case=False, na=False)
+                ]
+            else:
+                display_df = filtered_df
+            
+            # Show data table
+            st.dataframe(
+                display_df[[
+                    'name_Building', 'typeBuilding', 'location', 
+                    'generalcomments', 'final_comment', 'date',
+                    'latitude', 'longitude'
+                ]].sort_values('date', ascending=False),
+                use_container_width=True,
+                height=600
+            )
+        
+            with tab4:
+                st.header("Image Gallery")
+                
+                buildings_with_images = filtered_df[pd.notna(filtered_df['image_url'])]
+                
+                if not buildings_with_images.empty:
+                    cols = st.columns(3)
+                    successful_loads = 0
+                    
+                    for idx, row in buildings_with_images.iterrows():
+                        with cols[idx % 3]:
+                            try:
+                                # Create expander for each building
+                                with st.expander(f"{row['name_Building']} ({row['condition_category']})"):
+                                    # Try to display image
+                                    display_image_from_url(row['image_url'])
+                                    
+                                    # Show building info
+                                    st.caption(f"""
+                                    **Location:** {row['location']}  
+                                    **Type:** {row['typeBuilding']}  
+                                    **Condition:** {row['generalcomments']}  
+                                    **Date:** {row['date'].strftime('%Y-%m-%d')}
+                                    """)
+                                    
+                                    successful_loads += 1
+                            except Exception as e:
+                                st.warning(f"Couldn't display {row['name_Building']}: {str(e)}")
+                    
+                    if successful_loads == 0:
+                        st.warning("No images could be loaded from the available URLs")
+                else:
+                    st.warning("No images available for the selected filters")
+    if __name__ == "__main__":
+        main()
 elif option == "Dam Instrumentation":
     st.header("🌊 Relief Well Monitoring and Analysis")
     st.markdown("""
