@@ -98,7 +98,7 @@ st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
     "Choose Data to visualization:",
     [
-        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities","GHATZ Building Structures", "GHATZ Air Valves",
+        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities","GHATZ Building Structures", "GHATZ Air Valves", "GHATZ Center Pivot",
         "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
     ]
 )
@@ -1067,6 +1067,338 @@ elif option == "GHATZ Air Valves":
 
     # Call the function to run the app
     air_valve_analysis()
+elif option == "GHATZ Center Pivot":
+
+    def center_pivot_analysis():
+        @st.cache_data(ttl=3600)
+        def load_pivot_data():
+            try:
+                # Load data from Google Sheets
+                sheet = client.open("GHATZ_Data").worksheet("centerPivot")
+                data = sheet.get_all_records()
+                df = pd.DataFrame(data)
+                
+                # Clean and standardize condition categories
+                df['pivot_Condition'] = df['pivot_Condition'].str.strip().str.title()
+                
+                # Convert numeric columns
+                numeric_cols = ['latitude', 'longitude', 'altitude']
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                return df
+            
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
+
+        def display_image_from_url(url):
+            try:
+                if pd.notna(url):
+                    response = requests.get(url, timeout=5)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                    st.image(img, caption='Center Pivot Image', use_column_width=True)
+            except Exception as e:
+                st.warning(f"Couldn't load image: {str(e)}")
+
+        def main():
+            st.title("🌾 GHATZ Center Pivot Irrigation Analysis")
+            st.markdown("### Comprehensive analysis of center pivot irrigation systems across GHATZ camps")
+            
+            # Load data
+            df = load_pivot_data()
+            
+            if df.empty:
+                st.warning("No data loaded. Please check your connection.")
+                return
+            
+            # Sidebar filters
+            with st.sidebar:
+                st.header("🔍 Filters")
+                
+                # Location filter
+                selected_location = st.selectbox(
+                    "Select Camp Location",
+                    ['All'] + sorted(df['location'].unique()),
+                    index=0
+                )
+                
+                # Condition filter
+                condition_options = ['All'] + sorted(df['pivot_Condition'].dropna().unique())
+                selected_condition = st.selectbox(
+                    "Select Pivot Condition",
+                    condition_options,
+                    index=0
+                )
+                
+                # Ownership filter
+                ownership_options = ['All'] + sorted(df['pivot_ownership'].dropna().unique())
+                selected_ownership = st.multiselect(
+                    "Select Ownership(s)",
+                    options=ownership_options[1:],  # Skip 'All'
+                    default=[]
+                )
+                
+                # Functionality filter
+                functionality_options = ['All', 'Functioning', 'Not Functioning']
+                selected_functionality = st.selectbox(
+                    "Select Functionality Status",
+                    functionality_options,
+                    index=0
+                )
+
+            # Apply filters
+            filtered_df = df.copy()
+            if selected_location != 'All':
+                filtered_df = filtered_df[filtered_df['location'] == selected_location]
+            if selected_condition != 'All':
+                filtered_df = filtered_df[filtered_df['pivot_Condition'] == selected_condition]
+            if selected_ownership:
+                filtered_df = filtered_df[filtered_df['pivot_ownership'].isin(selected_ownership)]
+            if selected_functionality != 'All':
+                if selected_functionality == 'Functioning':
+                    filtered_df = filtered_df[filtered_df['generalcomments'].str.contains('Functioning', case=False, na=False)]
+                else:
+                    filtered_df = filtered_df[filtered_df['generalcomments'].str.contains('Not Functioning', case=False, na=False)]
+
+            # Main content
+            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+            
+            # Tabs layout
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📈 Overview Dashboard", 
+                "🗺️ Geospatial View", 
+                "🌾 Pivot Details", 
+                "🖼️ Image Gallery"
+            ])
+            
+# Replace the functionality by ownership section in tab1 with this:
+
+            with tab1:
+                st.header("Overview Dashboard")
+                
+                # Metrics row
+                col1, col2, col3 = st.columns(3)
+                col1.metric("Total Pivots", len(filtered_df))
+                functioning_count = len(filtered_df[filtered_df['generalcomments'].str.contains('Functioning', case=False, na=False)])
+                col2.metric("Functioning Pivots", functioning_count)
+                col3.metric("Ownership Types", filtered_df['pivot_ownership'].nunique())
+                
+                # Condition distribution
+                st.subheader("Condition Distribution")
+                if not filtered_df.empty:
+                    condition_counts = filtered_df['pivot_Condition'].value_counts().reset_index()
+                    condition_counts.columns = ['Condition', 'Count']
+                    
+                    fig = px.pie(
+                        condition_counts,
+                        names='Condition',
+                        values='Count',
+                        hole=0.3,
+                        title='Center Pivot Condition Distribution'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No data available for condition distribution")
+                
+                # Ownership distribution
+                st.subheader("Ownership Distribution")
+                if not filtered_df.empty:
+                    ownership_counts = filtered_df['pivot_ownership'].value_counts().reset_index()
+                    ownership_counts.columns = ['Ownership', 'Count']
+                    
+                    fig = px.bar(
+                        ownership_counts,
+                        x='Ownership',
+                        y='Count',
+                        title='Center Pivot Ownership Distribution'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No data available for ownership distribution")
+                
+                # Functionality by ownership
+                st.subheader("Functionality by Ownership")
+                if not filtered_df.empty:
+                    try:
+                        # Create a cross-tabulation of ownership vs functionality
+                        func_by_owner = pd.crosstab(
+                            filtered_df['pivot_ownership'],
+                            filtered_df['generalcomments'].str.contains('Functioning'),
+                            rownames=['Ownership'],
+                            colnames=['Functioning']
+                        )
+                        
+                        # Only try to rename columns if we have both statuses
+                        if len(func_by_owner.columns) == 2:
+                            func_by_owner.columns = ['Not Functioning', 'Functioning']
+                        elif len(func_by_owner.columns) == 1:
+                            # Handle case where we only have one status
+                            if func_by_owner.columns[0]:
+                                func_by_owner.columns = ['Functioning']
+                            else:
+                                func_by_owner.columns = ['Not Functioning']
+                        
+                        st.bar_chart(func_by_owner)
+                    except Exception as e:
+                        st.warning(f"Could not display functionality by ownership: {str(e)}")
+                else:
+                    st.warning("No data available for functionality analysis")            
+            with tab2:
+                st.header("Geospatial View")
+                
+                if not filtered_df[['latitude', 'longitude']].dropna().empty:
+                    # Create map
+                    map_center = [
+                        filtered_df['latitude'].mean(),
+                        filtered_df['longitude'].mean()
+                    ]
+                    m = folium.Map(location=map_center, zoom_start=12)
+                    
+                    # Color mapping for conditions
+                    color_map = {
+                        'Critical': 'red',
+                        'Good': 'orange',
+                        'Excellent': 'green'
+                    }
+                    
+                    # Add markers
+                    for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
+                        # Determine marker color
+                        condition = row['pivot_Condition']
+                        color = color_map.get(condition, 'gray')
+                        
+                        # Create popup content
+                        popup_content = f"""
+                        <b>Pivot ID:</b> {row['pivot_number']}<br>
+                        <b>Location:</b> {row['location']}<br>
+                        <b>Ownership:</b> {row['pivot_ownership']}<br>
+                        <b>Condition:</b> {condition}<br>
+                        <b>Status:</b> {row['generalcomments']}
+                        """
+                        if pd.notna(row['image_url']):
+                            popup_content += f"<br><a href='{row['image_url']}' target='_blank'>View Image</a>"
+                        
+                        folium.Marker(
+                            [row['latitude'], row['longitude']],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=f"Pivot {row['pivot_number']}",
+                            icon=folium.Icon(color=color, icon='tint', prefix='fa')
+                        ).add_to(m)
+                    
+                    folium_static(m, width=1200, height=600)
+                else:
+                    st.warning("No geospatial data available for the selected filters")
+            
+            with tab3:
+                st.header("Pivot Details")
+                
+                # Search functionality
+                search_query = st.text_input("🔍 Search pivots by ID or ownership")
+                if search_query:
+                    display_df = filtered_df[
+                        filtered_df['pivot_number'].astype(str).str.contains(search_query, case=False, na=False) |
+                        filtered_df['pivot_ownership'].astype(str).str.contains(search_query, case=False, na=False)
+                    ]
+                else:
+                    display_df = filtered_df.copy()
+                
+                # Display the dataframe
+                st.dataframe(
+                    display_df[[
+                        'pivot_number', 'location', 'pivot_ownership',
+                        'pivot_Condition', 'generalcomments', 'latitude', 'longitude'
+                    ]].sort_values('pivot_number'),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Image viewer section
+                st.subheader("Image Viewer")
+                
+                if not display_df.empty:
+                    # Create session state to track current image index
+                    if 'current_img_idx' not in st.session_state:
+                        st.session_state.current_img_idx = 0
+                    
+                    # Get all rows with valid image URLs
+                    image_rows = display_df[pd.notna(display_df['image_url'])].reset_index(drop=True)
+                    
+                    if len(image_rows) > 0:
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        
+                        with col1:
+                            if st.button("⏮️ Previous") and st.session_state.current_img_idx > 0:
+                                st.session_state.current_img_idx -= 1
+                        
+                        with col3:
+                            if st.button("⏭️ Next") and st.session_state.current_img_idx < len(image_rows) - 1:
+                                st.session_state.current_img_idx += 1
+                        
+                        with col2:
+                            current_row = image_rows.iloc[st.session_state.current_img_idx]
+                            st.markdown(f"**Pivot {current_row['pivot_number']}**")
+                            st.caption(f"Image {st.session_state.current_img_idx + 1} of {len(image_rows)}")
+                            
+                            try:
+                                display_image_from_url(current_row['image_url'])
+                                st.markdown(f"[📎 Open Image URL]({current_row['image_url']})", unsafe_allow_html=True)
+                            except Exception as e:
+                                st.warning(f"Couldn't load image: {str(e)}")
+                        
+                        # Display current pivot info
+                        with st.expander("📝 Pivot Details"):
+                            st.write(f"**Pivot ID:** {current_row['pivot_number']}")
+                            st.write(f"**Location:** {current_row['location']}")
+                            st.write(f"**Ownership:** {current_row['pivot_ownership']}")
+                            st.write(f"**Condition:** {current_row['pivot_Condition']}")
+                            st.write(f"**Status:** {current_row['generalcomments']}")
+                            st.write(f"**Coordinates:** {current_row['latitude']}, {current_row['longitude']}")
+                    else:
+                        st.warning("No images available for these pivots")
+                else:
+                    st.warning("No pivots match your search criteria")
+            
+            with tab4:
+                st.header("Image Gallery")
+                
+                pivots_with_images = filtered_df[pd.notna(filtered_df['image_url'])]
+                
+                if not pivots_with_images.empty:
+                    cols = st.columns(3)
+                    successful_loads = 0
+                    
+                    for idx, row in pivots_with_images.iterrows():
+                        with cols[idx % 3]:
+                            try:
+                                # Create expander for each pivot
+                                with st.expander(f"Pivot {row['pivot_number']} ({row['pivot_Condition']})"):
+                                    # Try to display image
+                                    display_image_from_url(row['image_url'])
+                                    
+                                    # Show pivot info
+                                    st.caption(f"""
+                                    **Location:** {row['location']}  
+                                    **Ownership:** {row['pivot_ownership']}  
+                                    **Status:** {row['generalcomments']}
+                                    """)
+                                    
+                                    successful_loads += 1
+                            except Exception as e:
+                                st.warning(f"Couldn't display Pivot {row['pivot_number']}: {str(e)}")
+                    
+                    if successful_loads == 0:
+                        st.warning("No images could be loaded from the available URLs")
+                else:
+                    st.warning("No images available for the selected filters")
+
+        if __name__ == "__main__":
+            main()
+
+    # Call the function to run the app
+    center_pivot_analysis()
 elif option == "Dam Instrumentation":
     st.header("🌊 Relief Well Monitoring and Analysis")
     st.markdown("""
