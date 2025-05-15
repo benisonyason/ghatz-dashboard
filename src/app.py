@@ -179,311 +179,7 @@ if option == "Home":
 
 elif option == "GHATZ Area Map":
     st.write("Here we can display an overview of your data.")
-elif option == "GHATZ Air Valves":
-    def air_valves_analysis():
-        @st.cache_data(ttl=3600)
-        def load_data():
-            sheet = client.open("GHATZ_Data").worksheet("airvalves")
-            data = sheet.get_all_records()
-            df = pd.DataFrame(data)
-            
-            # Data processing
-            df['_submission_time'] = pd.to_datetime(df['_submission_time'], errors='coerce')
-            
-            # Clean and standardize condition categories
-            if 'condition_category' in df.columns:
-                df['condition_category'] = df['condition_category'].str.strip()
-                # Fill NA with the most common value ('Good Condition')
-                df['condition_category'] = df['condition_category'].fillna('Good Condition')
-            else:
-                df['condition_category'] = 'Good Condition'
-            
-            df['year_month'] = df['_submission_time'].dt.to_period('M').astype(str)
-            return df
 
-        def display_image_from_url(url):
-            """Helper function to display images with error handling"""
-            if not pd.notna(url):
-                return False
-                
-            try:
-                if 'drive.google.com' in url:
-                    file_id = url.split('/d/')[1].split('/')[0]
-                    url = f"https://drive.google.com/uc?export=view&id={file_id}"
-                
-                response = requests.get(url, timeout=5)
-                response.raise_for_status()
-                img = Image.open(BytesIO(response.content))
-                st.image(img, caption='Air Valve Image', use_column_width=True)
-                return True
-            except Exception as e:
-                st.warning(f"Couldn't load image: {str(e)}")
-                return False
-
-        def create_map(filtered_df):
-            """Create and return a Folium map with markers"""
-            if filtered_df[['latitude', 'longitude']].dropna().empty:
-                return None
-                
-            map_center = [
-                filtered_df['latitude'].mean(),
-                filtered_df['longitude'].mean()
-            ]
-            m = folium.Map(location=map_center, zoom_start=12)
-            
-            # Dynamic color mapping based on actual conditions present
-            unique_conditions = filtered_df['condition_category'].unique()
-            color_map = {
-                'Severe Damage': 'red',
-                'Slight Damage': 'orange',
-                'Good Condition': 'green'
-            }
-            
-            for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
-                popup_content = f"""
-                <b>Valve ID:</b> {row['airvalves_facilities/airvalves_number']}<br>
-                <b>Location:</b> {row['location']}<br>
-                <b>Condition:</b> {row['condition_category']}<br>
-                <b>Accessibility:</b> {row['accessibility_state']}<br>
-                <b>Last Assessed:</b> {row['_submission_time'].strftime('%Y-%m-%d')}<br>
-                <b>Altitude:</b> {row['altitude']}m
-                """
-                if pd.notna(row['image_url']):
-                    popup_content += f"<br><a href='{row['image_url']}' target='_blank'>View Image</a>"
-                
-                color = color_map.get(row['condition_category'], 'gray')
-                icon = 'lock' if row['accessibility_state'] == 'No' else 'unlock'
-                
-                folium.Marker(
-                    [row['latitude'], row['longitude']],
-                    popup=folium.Popup(popup_content, max_width=300),
-                    tooltip=f"Valve {row['airvalves_facilities/airvalves_number']}",
-                    icon=folium.Icon(color=color, icon=icon, prefix='fa')
-                ).add_to(m)
-            
-            folium.LayerControl().add_to(m)
-            return m
-
-        def render_overview_tab(filtered_df):
-            """Render the overview dashboard tab"""
-            st.header("Overview Dashboard")
-            
-            # Metrics row
-            cols = st.columns(4)
-            cols[0].metric("Total Valves", len(filtered_df))
-            cols[1].metric("Camps Represented", filtered_df['location'].nunique())
-            cols[2].metric("Accessible Valves", len(filtered_df[filtered_df['accessibility_state'] == 'Yes']))
-            cols[3].metric("Date Range", 
-                f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to "
-                f"{filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}")
-            
-            # Condition distribution
-            st.subheader("Condition Distribution")
-            condition_counts = filtered_df['condition_category'].value_counts().reset_index()
-            condition_counts.columns = ['condition', 'count']
-            st.plotly_chart(
-                px.pie(condition_counts, names='condition', values='count', hole=0.3),
-                use_container_width=True
-            )
-            
-            # Accessibility distribution
-            st.subheader("Accessibility Status")
-            access_counts = filtered_df['accessibility_state'].value_counts().reset_index()
-            access_counts.columns = ['accessibility', 'count']
-            st.plotly_chart(
-                px.bar(access_counts, x='accessibility', y='count'),
-                use_container_width=True
-            )
-            
-            # Time series analysis
-            st.subheader("Assessments Over Time")
-            time_series = filtered_df.groupby(['year_month', 'condition_category']).size().unstack().fillna(0)
-            st.line_chart(time_series)
-
-        def render_geospatial_tab(filtered_df):
-            """Render the geospatial view tab"""
-            st.header("Geospatial View")
-            m = create_map(filtered_df)
-            
-            if m:
-                folium_static(m, width=1200, height=600)
-                st.download_button(
-                    label="📥 Download Valve Coordinates",
-                    data=filtered_df[['airvalves_facilities/airvalves_number', 'latitude', 'longitude', 'altitude']].to_csv(index=False),
-                    file_name='ghatz_air_valve_coordinates.csv',
-                    mime='text/csv'
-                )
-            else:
-                st.warning("No geospatial data available for the selected filters")
-
-        def render_valve_details_tab(filtered_df):
-            """Render the valve details tab"""
-            st.header("Valve Details")
-            search_query = st.text_input("🔍 Search valves by ID")
-            
-            display_df = filtered_df[
-                filtered_df['airvalves_facilities/airvalves_number'].str.contains(
-                    search_query, case=False, na=False
-                )
-            ] if search_query else filtered_df.copy()
-            
-            st.dataframe(
-                display_df[[
-                    'airvalves_facilities/airvalves_number', 'location', 
-                    'condition_category', 'accessibility_state', 'generalcomments',
-                    '_submission_time', 'latitude', 'longitude', 'altitude'
-                ]].sort_values('_submission_time', ascending=False),
-                use_container_width=True,
-                height=400
-            )
-            
-            st.subheader("Image Viewer")
-            if not display_df.empty:
-                if 'current_img_idx' not in st.session_state:
-                    st.session_state.current_img_idx = 0
-                
-                image_rows = display_df[pd.notna(display_df['image_url'])].reset_index(drop=True)
-                
-                if len(image_rows) > 0:
-                    cols = st.columns([1, 2, 1])
-                    current_idx = st.session_state.current_img_idx
-                    
-                    with cols[0]:
-                        if st.button("⏮️ Previous") and current_idx > 0:
-                            st.session_state.current_img_idx -= 1
-                    
-                    with cols[2]:
-                        if st.button("⏭️ Next") and current_idx < len(image_rows) - 1:
-                            st.session_state.current_img_idx += 1
-                    
-                    with cols[1]:
-                        current_row = image_rows.iloc[current_idx]
-                        st.markdown(f"**Valve {current_row['airvalves_facilities/airvalves_number']}**")
-                        st.caption(f"Image {current_idx + 1} of {len(image_rows)}")
-                        
-                        if display_image_from_url(current_row['image_url']):
-                            st.markdown(f"[📎 Open Image URL]({current_row['image_url']})", unsafe_allow_html=True)
-                        
-                        with st.expander("📝 Valve Details"):
-                            details = {
-                                "Valve ID": current_row['airvalves_facilities/airvalves_number'],
-                                "Location": current_row['location'],
-                                "Condition": current_row['condition_category'],
-                                "Accessibility": current_row['accessibility_state'],
-                                "Date Assessed": current_row['_submission_time'].strftime('%Y-%m-%d'),
-                                "Coordinates": f"{current_row['latitude']}, {current_row['longitude']}",
-                                "Altitude": f"{current_row['altitude']}m",
-                                "Comments": current_row['generalcomments']
-                            }
-                            for key, value in details.items():
-                                st.write(f"**{key}:** {value}")
-                else:
-                    st.warning("No images available for these valves")
-            else:
-                st.warning("No valves match your search criteria")
-
-        def render_image_gallery_tab(filtered_df):
-            """Render the image gallery tab"""
-            st.header("Image Gallery")
-            valves_with_images = filtered_df[pd.notna(filtered_df['image_url'])]
-            
-            if not valves_with_images.empty:
-                cols = st.columns(3)
-                successful_loads = 0
-                
-                for idx, row in valves_with_images.iterrows():
-                    with cols[idx % 3]:
-                        with st.expander(f"Valve {row['airvalves_facilities/airvalves_number']} ({row['condition_category']})"):
-                            if display_image_from_url(row['image_url']):
-                                st.caption(f"""
-                                **Location:** {row['location']}  
-                                **Accessibility:** {row['accessibility_state']}  
-                                **Condition:** {row['condition_category']}  
-                                **Date:** {row['_submission_time'].strftime('%Y-%m-%d')}
-                                """)
-                                successful_loads += 1
-                
-                if successful_loads == 0:
-                    st.warning("No images could be loaded from the available URLs")
-            else:
-                st.warning("No images available for the selected filters")
-
-        def main():
-            st.title("🚰 GHATZ Pipelines Air Valves Analysis")
-            st.markdown("### Comprehensive analysis of air valves across GHATZ pipelines")
-            
-            df = load_data()
-            
-            if df.empty:
-                st.warning("No data loaded. Please check your connection.")
-                return
-            
-            # Sidebar filters
-            with st.sidebar:
-                st.header("🔍 Filters")
-                
-                # Get unique conditions from actual data
-                unique_conditions = df['condition_category'].unique()
-                
-                selected_camp = st.selectbox(
-                    "Select Camp", 
-                    ['All'] + sorted(df['location'].unique()),
-                    index=0
-                )
-                
-                selected_condition = st.selectbox(
-                    "Select Condition", 
-                    ['All'] + sorted(unique_conditions),
-                    index=0
-                )
-                
-                selected_access = st.multiselect(
-                    "Select Accessibility",
-                    options=sorted(df['accessibility_state'].dropna().unique()),
-                    default=[]
-                )
-                
-                date_range = st.date_input(
-                    "Date Range",
-                    value=[df['_submission_time'].min().date(), df['_submission_time'].max().date()],
-                    min_value=df['_submission_time'].min().date(),
-                    max_value=df['_submission_time'].max().date()
-                )
-            
-            # Apply filters
-            filtered_df = df.copy()
-            if selected_camp != 'All':
-                filtered_df = filtered_df[filtered_df['location'] == selected_camp]
-            if selected_condition != 'All':
-                filtered_df = filtered_df[filtered_df['condition_category'] == selected_condition]
-            if selected_access:
-                filtered_df = filtered_df[filtered_df['accessibility_state'].isin(selected_access)]
-            if len(date_range) == 2:
-                filtered_df = filtered_df[
-                    (filtered_df['_submission_time'].dt.date >= date_range[0]) & 
-                    (filtered_df['_submission_time'].dt.date <= date_range[1])
-                ]
-
-            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
-            
-            tabs = st.tabs([
-                "📈 Overview Dashboard", 
-                "🗺️ Geospatial View", 
-                "🔧 Valve Details", 
-                "🖼️ Image Gallery"
-            ])
-            
-            with tabs[0]:
-                render_overview_tab(filtered_df)
-            with tabs[1]:
-                render_geospatial_tab(filtered_df)
-            with tabs[2]:
-                render_valve_details_tab(filtered_df)
-            with tabs[3]:
-                render_image_gallery_tab(filtered_df)
-
-        if __name__ == "__main__":
-            main()
 elif option == "GHATZ Facilities":
         # Default camp coordinates
         CAMP_COORDINATES = {
@@ -1070,6 +766,307 @@ elif option == "GHATZ Building Structures":
                     st.warning("No images available for the selected filters")
     if __name__ == "__main__":
         main()
+elif option == "GHATZ Air Valves":
+    def air_valve_analysis():
+        @st.cache_data(ttl=3600)
+        def load_airvalve_data():
+            try:           
+                # Load data from Google Sheets (replace with your actual sheet name)
+                sheet = client.open("GHATZ_Data").worksheet("airvalves")
+                data = sheet.get_all_records()
+                df = pd.DataFrame(data)
+                
+                # Convert and clean data
+                df['_submission_time'] = pd.to_datetime(df['_submission_time'], errors='coerce')
+                
+                # Handle numeric columns
+                numeric_cols = ['latitude', 'longitude', 'altitude']
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                return df
+            
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
+
+        # Display image with error handling
+        def display_image_from_url(url):
+            try:
+                if pd.notna(url):
+                    response = requests.get(url, timeout=5)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                    st.image(img, caption='Air Valve Image', use_column_width=True)
+            except Exception as e:
+                st.warning(f"Couldn't load image: {str(e)}")
+
+        # Main app function
+        def main():
+            st.title("🛢️ GHATZ Camp Air Valve Analysis")
+            st.markdown("### Comprehensive analysis of air valve infrastructure across GHATZ camps")
+            
+            # Load data
+            df = load_airvalve_data()
+            
+            if df.empty:
+                st.warning("No data loaded. Please check your connection.")
+                return
+            
+            # Data preparation
+            df['year_month'] = df['_submission_time'].dt.to_period('M').astype(str)
+            
+            # Sidebar filters
+            with st.sidebar:
+                st.header("🔍 Filters")
+                selected_camp = st.selectbox(
+                    "Select Camp", 
+                    ['All'] + sorted(df['location'].unique()),
+                    index=0
+                )
+                
+                selected_condition = st.selectbox(
+                    "Select Condition", 
+                    ['All'] + sorted(df['condition_category'].dropna().unique()),
+                    index=0
+                )
+                
+                selected_access = st.selectbox(
+                    "Select Accessibility",
+                    ['All'] + sorted(df['accessibility_state'].dropna().unique()),
+                    index=0
+                )
+                
+                date_range = st.date_input(
+                    "Date Range",
+                    value=[df['_submission_time'].min(), df['_submission_time'].max()],
+                    min_value=df['_submission_time'].min(),
+                    max_value=df['_submission_time'].max()
+                )
+            
+            # Apply filters
+            filtered_df = df.copy()
+            if selected_camp != 'All':
+                filtered_df = filtered_df[filtered_df['location'] == selected_camp]
+            if selected_condition != 'All':
+                filtered_df = filtered_df[filtered_df['condition_category'] == selected_condition]
+            if selected_access != 'All':
+                filtered_df = filtered_df[filtered_df['accessibility_state'] == selected_access]
+            if len(date_range) == 2:
+                filtered_df = filtered_df[
+                    (filtered_df['_submission_time'].dt.date >= date_range[0]) & 
+                    (filtered_df['_submission_time'].dt.date <= date_range[1])
+                ]
+
+            # Main content
+            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+            
+            # Tabs layout
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📈 Overview Dashboard", 
+                "🗺️ Geospatial View", 
+                "🛢️ Valve Details", 
+                "🖼️ Image Gallery"
+            ])
+            
+            with tab1:
+                st.header("Overview Dashboard")
+                
+                # Metrics row
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Valves", len(filtered_df))
+                col2.metric("Camps Represented", filtered_df['location'].nunique())
+                col3.metric("Valves Needing Repair", 
+                        len(filtered_df[filtered_df['condition_category'].isin(['Severe Damage', 'Slight Damage'])]))
+                col4.metric("Date Range", 
+                        f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to {filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}")
+                
+                # Condition distribution
+                st.subheader("Condition Distribution")
+                condition_counts = filtered_df['condition_category'].value_counts().reset_index()
+                condition_counts.columns = ['condition', 'count']
+                
+                fig = px.pie(
+                    condition_counts,
+                    names='condition',
+                    values='count',
+                    hole=0.3,
+                    title='Air Valve Condition Distribution'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Accessibility distribution
+                st.subheader("Accessibility Status")
+                access_counts = filtered_df['accessibility_state'].value_counts().reset_index()
+                access_counts.columns = ['accessibility', 'count']
+                
+                fig = px.bar(
+                    access_counts,
+                    x='accessibility',
+                    y='count',
+                    title='Air Valve Accessibility Status'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Time series analysis
+                st.subheader("Assessments Over Time")
+                time_series = filtered_df.groupby(['year_month', 'condition_category']).size().unstack().fillna(0)
+                st.area_chart(time_series)
+            
+            with tab2:
+                st.header("Geospatial View")
+                
+                if not filtered_df[['latitude', 'longitude']].dropna().empty:
+                    # Create map
+                    map_center = [
+                        filtered_df['latitude'].mean(),
+                        filtered_df['longitude'].mean()
+                    ]
+                    m = folium.Map(location=map_center, zoom_start=12)
+                    
+                    # Add markers
+                    for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
+                        popup_content = f"""
+                        <b>Location:</b> {row['location']}<br>
+                        <b>Valve ID:</b> {row['airvalves_facilities/airvalves_number']}<br>
+                        <b>Condition:</b> {row['condition_category']}<br>
+                        <b>Accessibility:</b> {row['accessibility_state']}<br>
+                        <b>Last Assessed:</b> {row['_submission_time'].strftime('%Y-%m-%d')}
+                        """
+                        if pd.notna(row['image_url']):
+                            popup_content += f"<br><a href='{row['image_url']}' target='_blank'>View Image</a>"
+                        
+                        # Color coding by condition
+                        color_map = {
+                            'Severe Damage': 'red',
+                            'Slight Damage': 'orange',
+                            'Good Condition': 'green'
+                        }
+                        color = color_map.get(row['condition_category'], 'gray')
+                        
+                        folium.Marker(
+                            [row['latitude'], row['longitude']],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=f"Valve {row['airvalves_facilities/airvalves_number']}",
+                            icon=folium.Icon(color=color, icon='tint', prefix='fa')
+                        ).add_to(m)
+                    
+                    folium_static(m, width=1200, height=600)
+                else:
+                    st.warning("No geospatial data available for the selected filters")
+            
+            with tab3:
+                st.header("Valve Details")
+                
+                # Search functionality
+                search_query = st.text_input("🔍 Search valves by ID")
+                if search_query:
+                    display_df = filtered_df[
+                        filtered_df['airvalves_facilities/airvalves_number'].astype(str).str.contains(search_query, case=False, na=False)
+                    ]
+                else:
+                    display_df = filtered_df.copy()
+                
+                # Display the dataframe without image_url (we'll handle images separately)
+                st.dataframe(
+                    display_df[[
+                        'airvalves_facilities/airvalves_number', 'location', 'condition_category',
+                        'accessibility_state', 'generalcomments', '_submission_time',
+                        'latitude', 'longitude'
+                    ]].sort_values('_submission_time', ascending=False),
+                    use_container_width=True,
+                    height=400
+                )
+                
+                # Image viewer section
+                st.subheader("Image Viewer")
+                
+                if not display_df.empty:
+                    # Create session state to track current image index if it doesn't exist
+                    if 'current_img_idx' not in st.session_state:
+                        st.session_state.current_img_idx = 0
+                    
+                    # Get all rows with valid image URLs
+                    image_rows = display_df[pd.notna(display_df['image_url'])].reset_index(drop=True)
+                    
+                    if len(image_rows) > 0:
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        
+                        with col1:
+                            if st.button("⏮️ Previous") and st.session_state.current_img_idx > 0:
+                                st.session_state.current_img_idx -= 1
+                        
+                        with col3:
+                            if st.button("⏭️ Next") and st.session_state.current_img_idx < len(image_rows) - 1:
+                                st.session_state.current_img_idx += 1
+                        
+                        with col2:
+                            current_row = image_rows.iloc[st.session_state.current_img_idx]
+                            st.markdown(f"**Valve {current_row['airvalves_facilities/airvalves_number']}**")
+                            st.caption(f"Image {st.session_state.current_img_idx + 1} of {len(image_rows)}")
+                            
+                            try:
+                                display_image_from_url(current_row['image_url'])
+                                
+                                # Display image URL as clickable link
+                                st.markdown(f"[📎 Open Image URL]({current_row['image_url']})", unsafe_allow_html=True)
+                            except Exception as e:
+                                st.warning(f"Couldn't load image: {str(e)}")
+                        
+                        # Display current valve info
+                        with st.expander("📝 Valve Details"):
+                            st.write(f"**Valve ID:** {current_row['airvalves_facilities/airvalves_number']}")
+                            st.write(f"**Location:** {current_row['location']}")
+                            st.write(f"**Condition:** {current_row['condition_category']}")
+                            st.write(f"**Accessibility:** {current_row['accessibility_state']}")
+                            st.write(f"**Date:** {current_row['_submission_time'].strftime('%Y-%m-%d')}")
+                            st.write(f"**Coordinates:** {current_row['latitude']}, {current_row['longitude']}")
+                            st.write(f"**Comments:** {current_row['generalcomments']}")
+                    else:
+                        st.warning("No images available for these valves")
+                else:
+                    st.warning("No valves match your search criteria")
+            
+            with tab4:
+                st.header("Image Gallery")
+                
+                valves_with_images = filtered_df[pd.notna(filtered_df['image_url'])]
+                
+                if not valves_with_images.empty:
+                    cols = st.columns(3)
+                    successful_loads = 0
+                    
+                    for idx, row in valves_with_images.iterrows():
+                        with cols[idx % 3]:
+                            try:
+                                # Create expander for each valve
+                                with st.expander(f"Valve {row['airvalves_facilities/airvalves_number']} ({row['condition_category']})"):
+                                    # Try to display image
+                                    display_image_from_url(row['image_url'])
+                                    
+                                    # Show valve info
+                                    st.caption(f"""
+                                    **Location:** {row['location']}  
+                                    **Condition:** {row['condition_category']}  
+                                    **Accessibility:** {row['accessibility_state']}  
+                                    **Date:** {row['_submission_time'].strftime('%Y-%m-%d')}
+                                    """)
+                                    
+                                    successful_loads += 1
+                            except Exception as e:
+                                st.warning(f"Couldn't display Valve {row['airvalves_facilities/airvalves_number']}: {str(e)}")
+                    
+                    if successful_loads == 0:
+                        st.warning("No images could be loaded from the available URLs")
+                else:
+                    st.warning("No images available for the selected filters")
+
+        if __name__ == "__main__":
+            main()
+
+    # Call the function to run the app
+    air_valve_analysis()
 elif option == "Dam Instrumentation":
     st.header("🌊 Relief Well Monitoring and Analysis")
     st.markdown("""
