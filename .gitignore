@@ -25,6 +25,8 @@ buildings_items.csv
 centerPivot.csv
 machineries.csv
 standpipedata.csv
+imageList.csv
+structural_components.csv
 
 # .streamlit/secrets.toml
 *.key

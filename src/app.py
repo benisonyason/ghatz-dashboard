@@ -98,11 +98,13 @@ st.sidebar.header("Select Data")
 option = st.sidebar.selectbox(
     "Choose Data to visualization:",
     [
-        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities", "GHATZ Building Structures", "GHATZ Air Valves", "GHATZ Center Pivot", "Machineries and Others", "GHATZ Agriculture", "GHATZ Tourism", "GHATZ Hydro", "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
-        "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", "GHATZ Staff Composition"
+        "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities", 
+        "GHATZ Building Structures", "GHATZ Air Valves", "GHATZ Center Pivot", 
+        "Machineries and Others", "GHATZ Agriculture", "GHATZ Tourism", 
+        "GHATZ Hydro", "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", 
+        "GHATZ Staff Composition"
     ]
 )
-
 # Footer
 
 # ========================================
@@ -178,8 +180,109 @@ if option == "Home":
     """, unsafe_allow_html=True)
 
 elif option == "GHATZ Area Map":
-    st.write("Here we can display an overview of your data.")
-
+    st.title("🌍 GHATZ Area Maps - still on Production")
+    st.markdown("Interactive maps of the GHATZ area with multiple viewing options")
+    
+    # Warning about large files
+    st.warning("""
+    ⚠️ These are high-resolution maps - for best performance on slower devices, 
+    use the low-resolution preview or download images to view locally.
+    """)
+    
+    # Define your image paths (adjust these to your actual image paths)
+    image_paths = {
+        "GHATZ Regional Topography Map": "map1.jpg",
+        "Landuse/Landcover Map": "map2.jpg",
+        "Vegetation Pattern Map": "map3.jpg"
+    }
+    
+    # Predefined annotations for each map (customize these as needed)
+    annotations = {
+        "GHATZ Regional Topography Map": [
+            dict(x=150, y=200, text="Main Dam", showarrow=True, arrowhead=2, ax=0, ay=-40),
+            dict(x=300, y=150, text="Reservoir", showarrow=True, arrowhead=2, ax=0, ay=-30)
+        ],
+        "Landuse/Landcover Map": [
+            dict(x=200, y=250, text="Irrigation Areas", showarrow=True, arrowhead=2, ax=20, ay=-30),
+            dict(x=350, y=100, text="Dam Area", showarrow=True, arrowhead=2, ax=-30, ay=20)
+        ],
+        "Vegetation Pattern Map": [
+            dict(x=100, y=300, text="Most Vegetate Zone", showarrow=True, arrowhead=2, ax=0, ay=-40),
+            dict(x=400, y=200, text="low Vegetated Zone", showarrow=True, arrowhead=2, ax=-30, ay=30)
+        ]
+    }
+    
+    # View mode selector
+    view_mode = st.selectbox(
+        "Select View Mode",
+        ["Interactive (Full Features)", "Static Image (Faster)", "Low-Resolution Preview"],
+        index=0
+    )
+    
+    # Create tabs for each map
+    tabs = st.tabs(list(image_paths.keys()))
+    
+    for tab, (caption, img_path) in zip(tabs, image_paths.items()):
+        with tab:
+            st.subheader(caption)
+            
+            try:
+                with st.spinner(f"Loading {caption}..."):
+                    img = Image.open(img_path)
+                    
+                    if view_mode == "Low-Resolution Preview":
+                        # Create thumbnail for preview
+                        preview_img = img.copy()
+                        preview_img.thumbnail((800, 800))
+                        st.image(preview_img, use_column_width=True, caption=f"Preview: {caption}")
+                        
+                    elif view_mode == "Static Image":
+                        st.image(img, use_column_width=True, caption=caption)
+                        
+                    else:  # Interactive mode
+                        fig = px.imshow(img)
+                        fig.update_layout(
+                            title=caption,
+                            coloraxis_showscale=False,
+                            annotations=annotations.get(caption, [])
+                        )
+                        st.plotly_chart(fig, use_column_width=True)
+                    
+                    # Download section
+                    st.markdown("---")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        with open(img_path, "rb") as file:
+                            st.download_button(
+                                label="📥 Download Full Resolution",
+                                data=file,
+                                file_name=f"GHATZ_{caption.replace(' ', '_')}_FULL.jpg",
+                                mime="image/jpeg"
+                            )
+                    with col2:
+                        if view_mode == "Low-Resolution Preview":
+                            buf = BytesIO()
+                            preview_img.save(buf, format="JPEG")
+                            st.download_button(
+                                label="📥 Download Preview Version",
+                                data=buf.getvalue(),
+                                file_name=f"GHATZ_{caption.replace(' ', '_')}_PREVIEW.jpg",
+                                mime="image/jpeg"
+                            )
+            
+            except FileNotFoundError:
+                st.error(f"Image file not found: {img_path}")
+            except Exception as e:
+                st.error(f"Error loading image: {str(e)}")
+    
+    # Map legend/instructions
+    st.markdown("""
+    ### Map Interaction Guide
+    - **Zoom**: Scroll or pinch (on touch devices)
+    - **Pan**: Click and drag
+    - **Reset View**: Double click
+    - **Annotations**: Hover over marked points for details
+    """)
 elif option == "GHATZ Facilities":
     # Default camp coordinates
     CAMP_COORDINATES = {
@@ -527,13 +630,12 @@ elif option == "GHATZ Building Structures":
     def display_image_from_url(url):
         try:
             if pd.notna(url):
-                response = requests.get(url, timeout=5)
+                response = requests.get(url, timeout=10)  # Added timeout
                 response.raise_for_status()
                 img = Image.open(BytesIO(response.content))
                 st.image(img, caption='Building Image', use_column_width=True)
         except Exception as e:
             st.warning(f"Couldn't load image: {str(e)}")
-
     # Main app function
     def main():
         st.title("🏗️ GHATZ Camp Building Structures Analysis")
