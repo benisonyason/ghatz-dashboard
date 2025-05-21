@@ -100,8 +100,8 @@ option = st.sidebar.selectbox(
     [
         "Home", "GHATZ Area Map", "Dam Instrumentation", "GHATZ Facilities", 
         "GHATZ Building Structures", "GHATZ Air Valves", "GHATZ Center Pivot", 
-        "Machineries and Others", "GHATZ Agriculture", "GHATZ Tourism", 
-        "GHATZ Hydro", "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", 
+        "Machineries and Others", "GHATZ Standpipe", "GHATZ Vibrating Wire",
+        "GHATZ Seepage", "GHATZ Weather", "GHATZ Security", "GHATZ Water Level", 
         "GHATZ Staff Composition"
     ]
 )
@@ -2959,6 +2959,12 @@ elif option == "GHATZ Staff Composition":
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
+elif option == "GHATZ Standpipe": 
+    st.write("Stand Pipe Analysis")
+elif option == "GHATZ Vibrating Wire":
+    st.write("Vibrating Wire Analysis")      
+elif option == "GHATZ Seepage":
+    st.write("Gurara Seepage Analysis")      
 
 # Add the sticky footer
 st.markdown(
