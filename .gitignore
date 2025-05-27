@@ -27,6 +27,7 @@ machineries.csv
 standpipedata.csv
 imageList.csv
 structural_components.csv
+seepage.csv
 
 # .streamlit/secrets.toml
 *.key

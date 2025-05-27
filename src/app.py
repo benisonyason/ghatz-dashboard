@@ -19,6 +19,7 @@ from google.oauth2 import service_account
 from datetime import datetime
 import altair as alt
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
 
 current_year = datetime.now().year
 
@@ -2964,9 +2965,372 @@ elif option == "GHATZ Standpipe":
 elif option == "GHATZ Vibrating Wire":
     st.write("Vibrating Wire Analysis")      
 elif option == "GHATZ Seepage":
-    st.write("Gurara Seepage Analysis")      
+    def dam_seepage_analysis():
+        # Constants
+        RISK_BINS = [0, 5, 20, 50, np.inf]
+        RISK_LABELS = ['Low', 'Moderate', 'High', 'Critical']
+        NUMERIC_COLS = ['Water collected (ml)', 'time taken (sec)', 'Flow (ml/sec)', 
+                       'Flow (Lt/sec)', 'Flow(Lt/Min)', 'Average']
+        
+        @st.cache_data(ttl=3600)
+        def load_seepage_data():
+            try:
+                # Load data from Google Sheets
+                sheet = client.open("GHATZ_Data").worksheet("seepage")
+                records = sheet.get_all_records()
+                df = pd.DataFrame(records)
+                
+                # Robust datetime parsing
+                def parse_datetime(row):
+                    try:
+                        date_str = str(row['Date']).strip()
+                        time_str = str(row['Reading Time']).strip().replace('_', ':').replace('::', ':')
+                        
+                        # Handle empty/missing values
+                        if not date_str or date_str.lower() == 'nan':
+                            return pd.NaT
+                        if not time_str or time_str.lower() == 'nan':
+                            return pd.NaT
+                            
+                        # Clean time components
+                        time_parts = time_str.split(':')
+                        time_parts = [p.zfill(2) for p in time_parts[:3]]  # Only take first 3 parts
+                        while len(time_parts) < 3:
+                            time_parts.append('00')  # Ensure we have H:M:S
+                            
+                        clean_time = ":".join(time_parts[:3])
+                        datetime_str = f"{date_str} {clean_time}"
+                        
+                        # Parse with dayfirst=True
+                        dt = pd.to_datetime(datetime_str, dayfirst=True, format='%d/%m/%Y %H:%M:%S', errors='raise')
+                        
+                        # Handle overflow hours
+                        if dt.hour >= 24:
+                            days = dt.hour // 24
+                            new_hour = dt.hour % 24
+                            dt += pd.Timedelta(days=days, hours=new_hour-dt.hour)
+                            
+                        return dt
+                    except Exception as e:
+                        st.warning(f"Failed to parse datetime for row {row.name}: {str(e)}")
+                        return pd.NaT
+                
+                # Apply datetime parsing
+                df['DateTime'] = df.apply(parse_datetime, axis=1)
+                df['Date'] = pd.to_datetime(df['Date'], dayfirst=True, errors='coerce')
+                
+                # Convert numeric columns with proper type handling
+                for col in NUMERIC_COLS:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Calculate metrics with type safety
+                df['Seepage Intensity'] = np.where(
+                    df['Average'].replace(0, np.nan).notna(),
+                    df['Flow(Lt/Min)'] / df['Average'].replace(0, np.nan),
+                    np.nan
+                )
+                
+                # Ensure Flow(Lt/Min) is numeric before binning
+                flow_values = pd.to_numeric(df['Flow(Lt/Min)'], errors='coerce')
+                df['Seepage Risk'] = pd.cut(
+                    flow_values,
+                    bins=RISK_BINS,
+                    labels=RISK_LABELS,
+                    right=False
+                )
+                
+                return df.dropna(subset=['DateTime']).sort_values('DateTime')
+            
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
 
-# Add the sticky footer
+        def create_filters(df):
+            """Create sidebar filters with robust type handling"""
+            with st.sidebar:
+                st.header("🔍 Filters")
+                
+                # Date range filter
+                min_date = df['Date'].min().to_pydatetime()
+                max_date = df['Date'].max().to_pydatetime()
+                date_range = st.date_input(
+                    "Date Range",
+                    value=[min_date, max_date],
+                    min_value=min_date,
+                    max_value=max_date
+                )
+                
+                # Location filter - ensure string type
+                locations = ['All'] + sorted(df['CH. or Location'].dropna().astype(str).unique().tolist())
+                selected_location = st.selectbox("Select Channel/Location", locations)
+                
+                # Remark filter - ensure string type
+                remarks = ['All'] + sorted(df['Remark'].dropna().astype(str).unique().tolist())
+                selected_remark = st.selectbox("Select Weather Condition", remarks)
+                
+                # Risk filter - use predefined order
+                risk_levels = ['All'] + RISK_LABELS
+                selected_risk = st.selectbox("Select Seepage Risk Level", risk_levels)
+            
+            # Apply filters with type safety
+            filtered_df = df.copy()
+            if len(date_range) == 2:
+                filtered_df = filtered_df[
+                    (filtered_df['Date'] >= pd.to_datetime(date_range[0])) & 
+                    (filtered_df['Date'] <= pd.to_datetime(date_range[1]))
+                ]
+            
+            if selected_location != 'All':
+                filtered_df = filtered_df[filtered_df['CH. or Location'].astype(str) == selected_location]
+            if selected_remark != 'All':
+                filtered_df = filtered_df[filtered_df['Remark'].astype(str) == selected_remark]
+            if selected_risk != 'All':
+                filtered_df = filtered_df[filtered_df['Seepage Risk'].astype(str) == selected_risk]
+            
+            return filtered_df
+
+        def display_metrics(df):
+            """Display key metrics in a compact layout"""
+            cols = st.columns(4)
+            metrics = [
+                ("Max Flow Rate", f"{df['Flow(Lt/Min)'].max():.2f} Lt/Min"),
+                ("Avg Flow Rate", f"{df['Flow(Lt/Min)'].mean():.2f} Lt/Min"),
+                ("Min Flow Rate", f"{df['Flow(Lt/Min)'].min():.2f} Lt/Min"),
+                ("Riskiest Location", df.loc[df['Flow(Lt/Min)'].idxmax(), 'CH. or Location'])
+            ]
+            
+            for col, (label, value) in zip(cols, metrics):
+                col.metric(label, value)
+
+        def flow_analysis_tab(df):
+            """Content for Flow Analysis tab"""
+            st.header("Flow Rate Analysis")
+            
+            if df.empty:
+                st.warning("No data available for the selected filters")
+                return
+            
+            display_metrics(df)
+            
+            # Flow rate distribution
+            st.subheader("Flow Rate Distribution")
+            fig = px.histogram(
+                df,
+                x='Flow(Lt/Min)',
+                nbins=20,
+                title='Distribution of Flow Rates',
+                labels={'Flow(Lt/Min)': 'Flow Rate (Lt/Min)'}
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Flow rate by location
+            st.subheader("Flow Rate by Location")
+            fig = px.box(
+                df,
+                x='CH. or Location',
+                y='Flow(Lt/Min)',
+                color='Remark',
+                title='Flow Rate Distribution by Location'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        def temporal_trends_tab(df):
+            """Content for Temporal Trends tab"""
+            st.header("Temporal Trends")
+            
+            if df.empty:
+                st.warning("No data available for the selected filters")
+                return
+            
+            # Time series of flow rates
+            st.subheader("Flow Rate Over Time")
+            fig = px.line(
+                df.sort_values('DateTime'),
+                x='DateTime',
+                y='Flow(Lt/Min)',
+                color='CH. or Location',
+                line_group='Remark',
+                title='Flow Rate Over Time'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Flow rate by weather condition
+            st.subheader("Flow Rate by Weather Condition")
+            fig = px.box(
+                df,
+                x='Remark',
+                y='Flow(Lt/Min)',
+                color='Remark',
+                title='Flow Rate Comparison: After Rain vs No Rain'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        def location_analysis_tab(df):
+            """Content for Location Analysis tab"""
+            st.header("Location Analysis")
+            
+            if df.empty:
+                st.warning("No data available for the selected filters")
+                return
+            
+            # Location flow rate comparison
+            st.subheader("Flow Rate Comparison by Location")
+            fig = px.bar(
+                df.groupby('CH. or Location')['Flow(Lt/Min)'].mean().reset_index(),
+                x='CH. or Location',
+                y='Flow(Lt/Min)',
+                color='CH. or Location',
+                title='Average Flow Rate by Location'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Location performance over time
+            st.subheader("Location Performance Over Time")
+            location_ts = df.pivot_table(
+                index='Date',
+                columns='CH. or Location',
+                values='Flow(Lt/Min)',
+                aggfunc='mean'
+            )
+            fig = go.Figure()
+            for col in location_ts.columns:
+                fig.add_trace(go.Scatter(
+                    x=location_ts.index,
+                    y=location_ts[col],
+                    name=col,
+                    mode='lines+markers'
+                ))
+            fig.update_layout(
+                title='Flow Rate Trends by Location',
+                xaxis_title='Date',
+                yaxis_title='Flow Rate (Lt/Min)'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        def dam_structure_tab(df):
+            """Content for Dam Structure Analysis tab"""
+            st.header("Dam Structure Analysis")
+            
+            if df.empty:
+                st.warning("No data available for the selected filters")
+                return
+            
+            # Risk assessment
+            st.subheader("Seepage Risk Assessment")
+            risk_counts = df['Seepage Risk'].value_counts().reset_index()
+            risk_counts.columns = ['Risk Level', 'Count']
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                fig = px.pie(
+                    risk_counts,
+                    names='Risk Level',
+                    values='Count',
+                    title='Distribution of Seepage Risk Levels',
+                    hole=0.4
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col2:
+                fig = px.bar(
+                    risk_counts,
+                    x='Risk Level',
+                    y='Count',
+                    color='Risk Level',
+                    title='Seepage Risk Count by Level'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+            
+            # Structural integrity analysis
+            st.subheader("Structural Integrity Indicators")
+            st.markdown("##### Seepage Intensity (Flow Rate vs Historical Average)")
+            
+            # Create a copy of the dataframe and handle NaN values for size parameter
+            plot_df = df.copy()
+            plot_df['Flow_Size'] = plot_df['Flow(Lt/Min)'].fillna(0)  # Replace NaN with 0 for size
+            
+            fig = px.scatter(
+                plot_df,
+                x='DateTime',
+                y='Seepage Intensity',
+                color='CH. or Location',
+                size='Flow_Size',  # Use the cleaned size values
+                hover_data=['Remark', 'Water collected (ml)'],
+                title='Seepage Intensity Over Time'
+            )
+            fig.add_hline(y=1, line_dash="dash", line_color="red", annotation_text="Normal Level")
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Critical locations
+            st.subheader("Critical Locations Analysis")
+            critical_locations = df[df['Seepage Risk'].isin(['High', 'Critical'])]
+            if not critical_locations.empty:
+                fig = px.sunburst(
+                    critical_locations,
+                    path=['Seepage Risk', 'CH. or Location'],
+                    values='Flow(Lt/Min)',
+                    title='Critical Seepage Locations Breakdown'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Show top critical measurements
+                st.markdown("##### Top Critical Measurements")
+                st.dataframe(
+                    critical_locations.nlargest(10, 'Flow(Lt/Min)')[[
+                        'Date', 'CH. or Location', 'Flow(Lt/Min)', 
+                        'Seepage Risk', 'Remark'
+                    ]].sort_values('Flow(Lt/Min)', ascending=False),
+                    use_container_width=True
+                )
+                
+                # Maintenance recommendations
+                st.subheader("Maintenance Recommendations")
+                st.warning("🚨 Immediate attention required for critical seepage locations:")
+                for loc in critical_locations['CH. or Location'].unique():
+                    loc_data = critical_locations[critical_locations['CH. or Location'] == loc]
+                    st.write(f"- **{loc}**: {len(loc_data)} critical measurements (Max flow: {loc_data['Flow(Lt/Min)'].max():.2f} Lt/Min)")
+                st.write("Recommended actions: Structural inspection, sealing of cracks, drainage improvement")
+            else:
+                st.success("✅ No critical seepage detected. Regular monitoring recommended.")
+
+        def main():
+            st.title("💧 Dam Seepage Analysis")
+            st.markdown("### Comprehensive analysis of dam seepage measurements and structural integrity")
+            
+            # Load data
+            df = load_seepage_data()
+            
+            if df.empty:
+                st.warning("No data loaded. Please check your data source.")
+                return
+            
+            # Apply filters
+            filtered_df = create_filters(df)
+            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} measurements")
+            
+            # Tabs layout
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📈 Flow Analysis", 
+                "📅 Temporal Trends", 
+                "📍 Location Analysis",
+                "🏗️ Dam Structure Analysis"
+            ])
+            
+            with tab1:
+                flow_analysis_tab(filtered_df)
+            with tab2:
+                temporal_trends_tab(filtered_df)
+            with tab3:
+                location_analysis_tab(filtered_df)
+            with tab4:
+                dam_structure_tab(filtered_df)
+
+        if __name__ == "__main__":
+            main()
+
+    # Call the function to run the app
+    dam_seepage_analysis()
 st.markdown(
 
     """
