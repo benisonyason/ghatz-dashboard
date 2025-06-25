@@ -12,6 +12,7 @@ venv/
 # Sensitive files
 credentials.json
 script.py
+generate_hashes.py
 guraradamwaterlevel.csv
 rainfalldata.csv
 security_report.csv
