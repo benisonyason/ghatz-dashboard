@@ -47,21 +47,37 @@ def check_password(username, password):
     hashed_pw = st.secrets["usernames"][username]["password"].encode()
     return bcrypt.checkpw(password.encode(), hashed_pw)
 
+# 
 def login_page():
-    st.title("Welcome to the GHATZ Data Platform")
-    st.subheader("Please log in to Access the Dashboard")
+    # Optional: Add a logo or banner
+    # st.image("ghatz_logo.png", width=200)  # Replace with your actual logo path
 
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
+    st.markdown("""
+        <h1 style='text-align: center; color: #2c3e50;'>GHATZ Data Platform</h1>
+        <h3 style='text-align: center; color: #34495e;'>Secure Login to Access the Dashboard</h3>
+        <br>
+    """, unsafe_allow_html=True)
 
-    if st.button("Login"):
-        if check_password(username, password):
-            st.session_state.authentication_status = True
-            st.session_state.username = username
-            st.success(f"Welcome {st.secrets['usernames'][username]['name']}!")
-            st.rerun()
-        else:
-            st.error("Invalid username or password")
+    # Centered layout using columns
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        username = st.text_input("👤 Username", placeholder="Enter your username")
+        password = st.text_input("🔒 Password", type="password", placeholder="Enter your password")
+
+        login_button = st.button("🔓 Login")
+
+        if login_button:
+            if check_password(username, password):
+                st.session_state.authentication_status = True
+                st.session_state.username = username
+                st.success(f"✅ Welcome, {st.secrets['usernames'][username]['name']}!")
+                st.balloons()  # 🎈 Optional fun effect
+                st.rerun()
+            else:
+                st.error("❌ Invalid username or password. Please try again.")
+
+    # Optional: Footer
+    st.markdown("<hr>", unsafe_allow_html=True)
 
 def main_app():
     # Initialize connection with error handling
