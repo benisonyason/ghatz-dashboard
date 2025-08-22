@@ -1918,8 +1918,8 @@ def show_ghatsCenterPivots_page(client):
                 col2.metric("Camps Represented", filtered_df['location'].nunique())
                 
                 # Count critical condition pivots
-                critical_count = len(filtered_df[filtered_df['pivot_Condition'] == 'Critical'])
-                col3.metric("Critical Condition Pivots", critical_count)
+                critical_count = len(filtered_df[filtered_df['pivot_Condition'] == 'Very Poor'])
+                col3.metric("Poor Condition Pivots", critical_count)
                 
                 if '_submission_time' in filtered_df.columns:
                     date_range_str = f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to {filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}"
@@ -1989,7 +1989,7 @@ def show_ghatsCenterPivots_page(client):
 
                     # Color coding by condition
                     condition_colors = {
-                        'Critical': 'red',
+                        'Very Poor': 'red',
                         'Good': 'green',
                         'Excellent': 'blue',
                         'Fair': 'orange',
@@ -3129,8 +3129,8 @@ def show_ghatzSeepage_page(client):
                             selected_location = st.selectbox("Select Channel/Location", locations)
                             
                             # Remark filter - ensure string type
-                            remarks = ['All'] + sorted(df['Remark'].dropna().astype(str).unique().tolist())
-                            selected_remark = st.selectbox("Select Weather Condition", remarks)
+                            # remarks = ['All'] + sorted(df['Remark'].dropna().astype(str).unique().tolist())
+                            # selected_remark = st.selectbox("Select Weather Condition", remarks)
                             
                             # Risk filter - use predefined order
                             risk_levels = ['All'] + RISK_LABELS
@@ -3146,8 +3146,8 @@ def show_ghatzSeepage_page(client):
                         
                         if selected_location != 'All':
                             filtered_df = filtered_df[filtered_df['CH. or Location'].astype(str) == selected_location]
-                        if selected_remark != 'All':
-                            filtered_df = filtered_df[filtered_df['Remark'].astype(str) == selected_remark]
+                        # if selected_remark != 'All':
+                        #     filtered_df = filtered_df[filtered_df['Remark'].astype(str) == selected_remark]
                         if selected_risk != 'All':
                             filtered_df = filtered_df[filtered_df['Seepage Risk'].astype(str) == selected_risk]
                         
