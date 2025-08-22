@@ -477,7 +477,7 @@ def show_facilities_page(client):
                         title='Facility Condition Distribution',
                         color='condition_status',
                         color_discrete_map={
-                            'Critical': 'red',
+                            'Very Poor': 'red',
                             'Poor': 'orange',
                             'Fair': 'yellow',
                             'Good': 'lightgreen',
@@ -527,9 +527,9 @@ def show_facilities_page(client):
                     st.plotly_chart(fig, use_container_width=True)
 
                     # Problem facilities by building type
-                    st.subheader("Critical/Poor Facilities by Building Type")
+                    st.subheader("Very Poor/Poor Facilities by Building Type")
                     critical_df = filtered_df[filtered_df['condition_status'].isin(
-                        ['Critical', 'Poor'])]
+                        ['Very Poor', 'Poor'])]
                     if not critical_df.empty:
                         fig = px.treemap(
                             critical_df,
@@ -540,7 +540,7 @@ def show_facilities_page(client):
                         )
                         st.plotly_chart(fig, use_container_width=True)
                     else:
-                        st.info("No Critical/Poor facilities for current filters")
+                        st.info("No Very Poor/Poor facilities for current filters")
 
                 with tab4:
                     st.header("Geospatial View")
@@ -565,7 +565,7 @@ def show_facilities_page(client):
                                 popup_content = f"""
                                     <h4>{camp_name}</h4>
                                     <b>Total Facilities:</b> {len(camp_data)}<br>
-                                    <b>Critical:</b> {condition_summary.get('Critical', 0)}<br>
+                                    <b>Very Poor:</b> {condition_summary.get('Very Poor', 0)}<br>
                                     <b>Poor:</b> {condition_summary.get('Poor', 0)}<br>
                                     <b>Fair:</b> {condition_summary.get('Fair', 0)}<br>
                                     <b>Good:</b> {condition_summary.get('Good', 0)}<br>
@@ -586,7 +586,7 @@ def show_facilities_page(client):
 
                                 # Add circle for each condition status
                                 condition_colors = {
-                                    'Critical': 'red',
+                                    'Very Poor': 'red',
                                     'Poor': 'orange',
                                     'Fair': 'yellow',
                                     'Good': 'lightgreen',
@@ -676,7 +676,7 @@ def show_facilities_page(client):
                 # Add conditional formatting explanation
                 with st.expander("ℹ️ Condition Status Definitions"):
                     st.markdown("""
-                        - **Critical**: Immediate replacement needed
+                        - **Very Poor**: Immediate replacement needed
                         - **Poor**: Significant repairs required
                         - **Fair**: Functional but needs attention
                         - **Good**: Fully functional, minor wear
@@ -732,7 +732,7 @@ def show_ghatzBuilding_page(client):
                     # Data preparation
                     df['year_month'] = df['date'].dt.to_period('M').astype(str)
                     df['condition_category'] = df['generalcomments'].str.extract(
-                        r'(Severe|Moderate|Slight|Good|Extreme)')[0]
+                        r'(Very Poor|Poor|Fair|Good|Excellent)')[0]
 
                     # Sidebar filters
                     with st.sidebar:
@@ -846,11 +846,11 @@ def show_ghatzBuilding_page(client):
 
                                 # Color coding by condition
                                 color_map = {
-                                    'Extreme': 'black',
-                                    'Severe': 'red',
-                                    'Moderate': 'orange',
-                                    'Slight': 'beige',
-                                    'Good': 'green'
+                                    'Very Poor': 'red',
+                                    'Poor': 'black',
+                                    'Fair': 'orange',
+                                    'Good': 'beige',
+                                    'Excellent': 'green'
                                 }
                                 color = color_map.get(row['condition_category'], 'gray')
 
@@ -1577,8 +1577,8 @@ def show_ghatsAirValves_page(client):
                             col1.metric("Total Valves", len(filtered_df))
                             col2.metric("Camps Represented",
                                         filtered_df['location'].nunique())
-                            col3.metric("Valves Needing Repair",
-                                        len(filtered_df[filtered_df['condition_category'].isin(['Severe Damage', 'Slight Damage'])]))
+                            col3.metric("Valves Needing Repair(Chamber)",
+                                        len(filtered_df[filtered_df['condition_category'].isin(['Need Replacement'])]))
                             col4.metric("Date Range",
                                         f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to {filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}")
 
@@ -1632,8 +1632,9 @@ def show_ghatsAirValves_page(client):
                                 for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
                                     popup_content = f"""
                                     <b>Location:</b> {row['location']}<br>
-                                    <b>Valve ID:</b> {row['airvalves_facilities/airvalves_number']}<br>
-                                    <b>Condition:</b> {row['condition_category']}<br>
+                                    <b>Valve Chamber ID:</b> {row['airvalves_facilities/airvalves_number']}<br>
+                                    <b>Condition Status:</b> {row['condition_category']}<br>
+                                    <b>Burglar Condition:</b> {row['generalcomments']}<br>
                                     <b>Accessibility:</b> {row['accessibility_state']}<br>
                                     <b>Last Assessed:</b> {row['_submission_time'].strftime('%Y-%m-%d')}
                                     """
@@ -1642,8 +1643,7 @@ def show_ghatsAirValves_page(client):
 
                                     # Color coding by condition
                                     color_map = {
-                                        'Severe Damage': 'red',
-                                        'Slight Damage': 'orange',
+                                        'Need Replacement': 'red',
                                         'Good Condition': 'green'
                                     }
                                     color = color_map.get(
@@ -1663,10 +1663,10 @@ def show_ghatsAirValves_page(client):
                                     "No geospatial data available for the selected filters")
 
                         with tab3:
-                            st.header("Valve Details")
+                            st.header("Valve Chamber Details")
 
                             # Search functionality
-                            search_query = st.text_input("🔍 Search valves by ID")
+                            search_query = st.text_input("🔍 Search Valve Chamber by ID")
                             if search_query:
                                 display_df = filtered_df[
                                     filtered_df['airvalves_facilities/airvalves_number'].astype(
@@ -1733,7 +1733,7 @@ def show_ghatsAirValves_page(client):
                                         st.write(
                                             f"**Location:** {current_row['location']}")
                                         st.write(
-                                            f"**Condition:** {current_row['condition_category']}")
+                                            f"**Condition Status:** {current_row['condition_category']}")
                                         st.write(
                                             f"**Accessibility:** {current_row['accessibility_state']}")
                                         st.write(
@@ -1741,7 +1741,7 @@ def show_ghatsAirValves_page(client):
                                         st.write(
                                             f"**Coordinates:** {current_row['latitude']}, {current_row['longitude']}")
                                         st.write(
-                                            f"**Comments:** {current_row['generalcomments']}")
+                                            f"**Burglar Condition:** {current_row['generalcomments']}")
                                 else:
                                     st.warning("No images available for these valves")
                             else:
