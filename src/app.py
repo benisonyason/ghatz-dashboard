@@ -173,6 +173,8 @@ def main_app():
         show_ghatzBuilding_page(client)
     elif st.session_state.option == "GHATZ Air Valves":
         show_ghatsAirValves_page(client)
+    elif st.session_state.option == "GHATZ Center Pivot":
+        show_ghatsCenterPivots_page(client)
     elif st.session_state.option == "Machineries and Others":
         show_ghatzMachineries_page(client)
     elif st.session_state.option == "GHATZ Weather":
@@ -1789,6 +1791,349 @@ def show_ghatsAirValves_page(client):
 
                 # Call the function to run the app
                 air_valve_analysis()
+def show_ghatsCenterPivots_page(client):
+    def center_pivot_analysis():
+        @st.cache_data(ttl=3600)
+        def load_centerpivot_data():
+            try:
+                # Load data from Google Sheets
+                sheet = client.open("GHATZ_Data").worksheet("centerPivot")
+                data = sheet.get_all_records()
+                df = pd.DataFrame(data)
+
+                # Convert and clean data
+                if '_submission_time' in df.columns:
+                    df['_submission_time'] = pd.to_datetime(df['_submission_time'], errors='coerce')
+
+                # Handle numeric columns
+                numeric_cols = ['latitude', 'longitude', 'altitude']
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+                return df
+
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
+
+        # Display image with error handling
+        def display_image_from_url(url):
+            try:
+                if pd.notna(url):
+                    # Handle Google Drive URLs - convert to direct download link
+                    if 'drive.google.com' in url and '/file/d/' in url:
+                        file_id = url.split('/file/d/')[1].split('/')[0]
+                        url = f"https://drive.google.com/uc?id={file_id}"
+                    
+                    response = requests.get(url, timeout=10)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                    st.image(img, caption='Center Pivot Image', use_column_width=True)
+            except Exception as e:
+                st.warning(f"Couldn't load image: {str(e)}")
+
+        # Main app function
+        def main():
+            st.title("🌾 GHATZ Camp Center Pivot Analysis")
+            st.markdown("### Comprehensive analysis of center pivot irrigation systems across GHATZ camps")
+
+            # Load data
+            df = load_centerpivot_data()
+
+            if df.empty:
+                st.warning("No data loaded. Please check your connection.")
+                return
+
+            # Data preparation
+            if '_submission_time' in df.columns:
+                df['year_month'] = df['_submission_time'].dt.to_period('M').astype(str)
+            else:
+                df['year_month'] = 'Unknown'
+
+            # Sidebar filters
+            with st.sidebar:
+                st.header("🔍 Filters")
+                
+                selected_camp = st.selectbox(
+                    "Select Camp",
+                    ['All'] + sorted(df['location'].dropna().unique()),
+                    index=0
+                )
+
+                selected_condition = st.selectbox(
+                    "Select Condition",
+                    ['All'] + sorted(df['pivot_Condition'].dropna().unique()),
+                    index=0
+                )
+
+                selected_access = st.selectbox(
+                    "Select Accessibility",
+                    ['All'] + sorted(df['accessibility_state'].dropna().unique()),
+                    index=0
+                )
+
+                if '_submission_time' in df.columns:
+                    date_range = st.date_input(
+                        "Date Range",
+                        value=[df['_submission_time'].min(), df['_submission_time'].max()],
+                        min_value=df['_submission_time'].min(),
+                        max_value=df['_submission_time'].max()
+                    )
+                else:
+                    date_range = [None, None]
+
+            # Apply filters
+            filtered_df = df.copy()
+            if selected_camp != 'All':
+                filtered_df = filtered_df[filtered_df['location'] == selected_camp]
+            if selected_condition != 'All':
+                filtered_df = filtered_df[filtered_df['pivot_Condition'] == selected_condition]
+            if selected_access != 'All':
+                filtered_df = filtered_df[filtered_df['accessibility_state'] == selected_access]
+            
+            if '_submission_time' in df.columns and len(date_range) == 2:
+                filtered_df = filtered_df[
+                    (filtered_df['_submission_time'].dt.date >= date_range[0]) &
+                    (filtered_df['_submission_time'].dt.date <= date_range[1])
+                ]
+
+            # Main content
+            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+
+            # Tabs layout
+            tab1, tab2, tab3, tab4 = st.tabs([
+                "📈 Overview Dashboard",
+                "🗺️ Geospatial View",
+                "🌾 Pivot Details",
+                "🖼️ Image Gallery"
+            ])
+
+            with tab1:
+                st.header("Overview Dashboard")
+
+                # Metrics row
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Pivots", len(filtered_df))
+                col2.metric("Camps Represented", filtered_df['location'].nunique())
+                
+                # Count critical condition pivots
+                critical_count = len(filtered_df[filtered_df['pivot_Condition'] == 'Critical'])
+                col3.metric("Critical Condition Pivots", critical_count)
+                
+                if '_submission_time' in filtered_df.columns:
+                    date_range_str = f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to {filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}"
+                else:
+                    date_range_str = "No date data"
+                col4.metric("Date Range", date_range_str)
+
+                # Condition distribution
+                st.subheader("Condition Distribution")
+                if 'pivot_Condition' in filtered_df.columns:
+                    condition_counts = filtered_df['pivot_Condition'].value_counts().reset_index()
+                    condition_counts.columns = ['condition', 'count']
+
+                    fig = px.pie(
+                        condition_counts,
+                        names='condition',
+                        values='count',
+                        hole=0.3,
+                        title='Center Pivot Condition Distribution'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No condition data available")
+
+                # Ownership distribution
+                st.subheader("Ownership Status")
+                if 'pivot_ownership' in filtered_df.columns:
+                    ownership_counts = filtered_df['pivot_ownership'].value_counts().reset_index()
+                    ownership_counts.columns = ['ownership', 'count']
+
+                    fig = px.bar(
+                        ownership_counts,
+                        x='ownership',
+                        y='count',
+                        title='Center Pivot Ownership Distribution'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No ownership data available")
+
+                # Accessibility distribution
+                st.subheader("Accessibility Status")
+                if 'accessibility_state' in filtered_df.columns:
+                    access_counts = filtered_df['accessibility_state'].value_counts().reset_index()
+                    access_counts.columns = ['accessibility', 'count']
+
+                    fig = px.bar(
+                        access_counts,
+                        x='accessibility',
+                        y='count',
+                        title='Center Pivot Accessibility Status'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.warning("No accessibility data available")
+
+            with tab2:
+                st.header("Geospatial View")
+
+                if not filtered_df[['latitude', 'longitude']].dropna().empty:
+                    # Create map
+                    map_center = [
+                        filtered_df['latitude'].mean(),
+                        filtered_df['longitude'].mean()
+                    ]
+                    m = folium.Map(location=map_center, zoom_start=10)
+
+                    # Color coding by condition
+                    condition_colors = {
+                        'Critical': 'red',
+                        'Good': 'green',
+                        'Excellent': 'blue',
+                        'Fair': 'orange',
+                        'Poor': 'purple'
+                    }
+
+                    # Add markers
+                    for _, row in filtered_df.dropna(subset=['latitude', 'longitude']).iterrows():
+                        popup_content = f"""
+                        <b>Location:</b> {row.get('location', 'N/A')}<br>
+                        <b>Pivot Number:</b> {row.get('pivot_number', 'N/A')}<br>
+                        <b>Condition:</b> {row.get('pivot_Condition', 'N/A')}<br>
+                        <b>Ownership:</b> {row.get('pivot_ownership', 'N/A')}<br>
+                        <b>Accessibility:</b> {row.get('accessibility_state', 'N/A')}<br>
+                        <b>Altitude:</b> {row.get('altitude', 'N/A')}m
+                        """
+                        if pd.notna(row.get('image_url')):
+                            popup_content += f"<br><a href='{row['image_url']}' target='_blank'>View Image</a>"
+
+                        condition = row.get('pivot_Condition', 'Unknown')
+                        color = condition_colors.get(condition, 'gray')
+
+                        folium.Marker(
+                            [row['latitude'], row['longitude']],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=f"Pivot {row.get('pivot_number', 'Unknown')}",
+                            icon=folium.Icon(color=color, icon='tint', prefix='fa')
+                        ).add_to(m)
+
+                    folium_static(m, width=1200, height=600)
+                else:
+                    st.warning("No geospatial data available for the selected filters")
+
+            with tab3:
+                st.header("Center Pivot Details")
+
+                # Search functionality
+                search_query = st.text_input("🔍 Search Center Pivot by ID or Number")
+                if search_query:
+                    display_df = filtered_df[
+                        filtered_df['pivot_number'].astype(str).str.contains(search_query, case=False, na=False) |
+                        filtered_df['_index'].astype(str).str.contains(search_query, case=False, na=False)
+                    ]
+                else:
+                    display_df = filtered_df.copy()
+
+                # Display the dataframe
+                columns_to_show = [
+                    'pivot_number', 'location', 'pivot_Condition', 'pivot_ownership',
+                    'accessibility_state', 'generalcomments', 'latitude', 'longitude', 'altitude'
+                ]
+                if '_submission_time' in display_df.columns:
+                    columns_to_show.append('_submission_time')
+
+                st.dataframe(
+                    display_df[columns_to_show].sort_values('_submission_time' if '_submission_time' in display_df.columns else 'pivot_number', ascending=False),
+                    use_container_width=True,
+                    height=400
+                )
+
+                # Image viewer section
+                st.subheader("Image Viewer")
+
+                if not display_df.empty:
+                    # Create session state to track current image index
+                    if 'current_pivot_img_idx' not in st.session_state:
+                        st.session_state.current_pivot_img_idx = 0
+
+                    # Get all rows with valid image URLs
+                    image_rows = display_df[pd.notna(display_df['image_url'])].reset_index(drop=True)
+
+                    if len(image_rows) > 0:
+                        col1, col2, col3 = st.columns([1, 2, 1])
+
+                        with col1:
+                            if st.button("⏮️ Previous") and st.session_state.current_pivot_img_idx > 0:
+                                st.session_state.current_pivot_img_idx -= 1
+
+                        with col3:
+                            if st.button("⏭️ Next") and st.session_state.current_pivot_img_idx < len(image_rows) - 1:
+                                st.session_state.current_pivot_img_idx += 1
+
+                        with col2:
+                            current_row = image_rows.iloc[st.session_state.current_pivot_img_idx]
+                            st.markdown(f"**Pivot {current_row.get('pivot_number', 'Unknown')}**")
+                            st.caption(f"Image {st.session_state.current_pivot_img_idx + 1} of {len(image_rows)}")
+
+                            try:
+                                display_image_from_url(current_row['image_url'])
+                                st.markdown(f"[📎 Open Image URL]({current_row['image_url']})", unsafe_allow_html=True)
+                            except Exception as e:
+                                st.warning(f"Couldn't load image: {str(e)}")
+
+                        # Display current pivot info
+                        with st.expander("📝 Pivot Details"):
+                            st.write(f"**Pivot ID:** {current_row.get('pivot_number', 'N/A')}")
+                            st.write(f"**Location:** {current_row.get('location', 'N/A')}")
+                            st.write(f"**Condition:** {current_row.get('pivot_Condition', 'N/A')}")
+                            st.write(f"**Ownership:** {current_row.get('pivot_ownership', 'N/A')}")
+                            st.write(f"**Accessibility:** {current_row.get('accessibility_state', 'N/A')}")
+                            st.write(f"**Coordinates:** {current_row.get('latitude', 'N/A')}, {current_row.get('longitude', 'N/A')}")
+                            st.write(f"**Altitude:** {current_row.get('altitude', 'N/A')}m")
+                            st.write(f"**Comments:** {current_row.get('generalcomments', 'N/A')}")
+                    else:
+                        st.warning("No images available for these pivots")
+                else:
+                    st.warning("No pivots match your search criteria")
+
+            with tab4:
+                st.header("Image Gallery")
+
+                pivots_with_images = filtered_df[pd.notna(filtered_df['image_url'])]
+
+                if not pivots_with_images.empty:
+                    cols = st.columns(3)
+                    successful_loads = 0
+
+                    for idx, row in pivots_with_images.iterrows():
+                        with cols[idx % 3]:
+                            try:
+                                with st.expander(f"Pivot {row.get('pivot_number', 'Unknown')} ({row.get('pivot_Condition', 'Unknown')})"):
+                                    display_image_from_url(row['image_url'])
+                                    
+                                    st.caption(f"""
+                                    **Location:** {row.get('location', 'N/A')}  
+                                    **Condition:** {row.get('pivot_Condition', 'N/A')}  
+                                    **Ownership:** {row.get('pivot_ownership', 'N/A')}  
+                                    **Accessibility:** {row.get('accessibility_state', 'N/A')}
+                                    """)
+                                    
+                                    successful_loads += 1
+                            except Exception as e:
+                                st.warning(f"Couldn't display Pivot {row.get('pivot_number', 'Unknown')}: {str(e)}")
+
+                    if successful_loads == 0:
+                        st.warning("No images could be loaded from the available URLs")
+                else:
+                    st.warning("No images available for the selected filters")
+
+        if __name__ == "__main__":
+            main()
+
+    # Call the function to run the app
+    center_pivot_analysis()
 def show_ghatzMachineries_page(client):
                 def machinery_analysis():
                     @st.cache_data(ttl=3600)
