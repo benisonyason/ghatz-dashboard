@@ -1497,9 +1497,9 @@ def show_ghatsAirValves_page(client):
 
                     # Main app function
                     def main():
-                        st.title("🛢️ GHATZ Camp Air Valve Analysis")
+                        st.title("🛢️ GHATZ Air Valve Analysis by Chamber")
                         st.markdown(
-                            "### Comprehensive analysis of air valve infrastructure across GHATZ camps")
+                            "### Comprehensive analysis of air valve Chamber infrastructure across GHATZ camps")
 
                         # Load data
                         df = load_airvalve_data()
@@ -1576,13 +1576,13 @@ def show_ghatsAirValves_page(client):
 
                             # Metrics row
                             col1, col2, col3, col4 = st.columns(4)
-                            col1.metric("Total Valves", len(filtered_df))
+                            col1.metric("Total Valves Chambers", len(filtered_df))
                             col2.metric("Camps Represented",
                                         filtered_df['location'].nunique())
-                            col3.metric("Valves Needing Repair(Chamber)",
+                            col3.metric("Valves Chambers Needing Repair",
                                         len(filtered_df[filtered_df['condition_category'].isin(['Need Replacement'])]))
-                            col4.metric("Date Range",
-                                        f"{filtered_df['_submission_time'].min().strftime('%Y-%m-%d')} to {filtered_df['_submission_time'].max().strftime('%Y-%m-%d')}")
+                            col4.metric("Faulty Burglars",
+                                        len(filtered_df[filtered_df['generalcomments'].isin(['No Burglar'])]))
 
                             # Condition distribution
                             st.subheader("Condition Distribution")
@@ -2175,14 +2175,10 @@ def show_ghatzMachineries_page(client):
                         if pd.isna(comment):
                             return "Unknown"
                         comment = str(comment).lower()
-                        if "functioning" in comment:
-                            return "Functioning"
-                        elif "not functioning" in comment:
-                            return "Not Functioning"
-                        elif "functional" in comment:
-                            return "Functioning"
-                        elif "not functional" in comment:
-                            return "Not Functioning"
+                        if "not functioning" in comment or "not functional" in comment:
+                             return "Not Functioning"
+                        elif "functioning" in comment or "functional" in comment:
+                             return "Functioning"
                         else:
                             return "Unknown"
 
