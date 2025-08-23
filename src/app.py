@@ -3020,7 +3020,423 @@ def show_ghatzStaff_page(client):
                 except Exception as e:
                     st.error(f"An error occurred: {str(e)}")
 def show_ghatzStandpipe_page(client):
-    st.write("Stand Pipe Analysis")
+    def standpipe_analysis():
+        @st.cache_data(ttl=3600)
+        def load_standpipe_data():
+            try:
+                # Load data from Google Sheets
+                sheet = client.open("GHATZ_Data").worksheet("standpipedata")
+                data = sheet.get_all_records()
+                df = pd.DataFrame(data)
+                
+                # Clean and convert data types
+                # Convert date columns
+                date_columns = ['DATE OF INSTALLATION', 'Dates']
+                for col in date_columns:
+                    if col in df.columns:
+                        df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
+                
+                # Convert numeric columns
+                numeric_cols = ['section_id', 'CHAINAGE', 'OFFSET', 'X', 'Y', 'GROUND LEVEL ELEV', 
+                               'Depth', 'Elevation']
+                for col in numeric_cols:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                
+                # Extract additional information from PIEZOMETER ID
+                if 'PIEZOMETER ID.No. & TYPE' in df.columns:
+                    df['PIEZOMETER_ID'] = df['PIEZOMETER ID.No. & TYPE'].str.split(' - ').str[0]
+                    df['PIEZOMETER_TYPE'] = df['PIEZOMETER ID.No. & TYPE'].str.split(' - ').str[1]
+                
+                # Calculate time since installation
+                if 'DATE OF INSTALLATION' in df.columns and 'Dates' in df.columns:
+                    df['DAYS_SINCE_INSTALLATION'] = (df['Dates'] - df['DATE OF INSTALLATION']).dt.days
+                    df['MONTHS_SINCE_INSTALLATION'] = df['DAYS_SINCE_INSTALLATION'] / 30.44
+                
+                # Calculate water level changes
+                if 'Depth' in df.columns and 'GROUND LEVEL ELEV' in df.columns:
+                    df['WATER_LEVEL'] = df['GROUND LEVEL ELEV'] - df['Depth']
+                
+                return df
+
+            except Exception as e:
+                st.error(f"Error loading data: {str(e)}")
+                return pd.DataFrame()
+
+        def main():
+            st.title("🌊 GHATZ Standpipe Piezometer Analysis")
+            st.markdown("### Comprehensive monitoring and analysis of standpipe piezometer data")
+
+            # Load data
+            df = load_standpipe_data()
+
+            if df.empty:
+                st.warning("No data loaded. Please check your connection.")
+                return
+
+            # Sidebar filters
+            with st.sidebar:
+                st.header("🔍 Filters")
+                
+                # Section filter
+                sections = ['All'] + sorted(df['section_id'].dropna().unique().astype(int).astype(str).tolist())
+                selected_section = st.selectbox(
+                    "Select Section",
+                    sections,
+                    index=0
+                )
+
+                # Piezometer filter
+                piezometers = ['All'] + sorted(df['PIEZOMETER_ID'].dropna().unique())
+                selected_piezometer = st.selectbox(
+                    "Select Piezometer",
+                    piezometers,
+                    index=0
+                )
+
+                # Date range filter
+                if 'Dates' in df.columns:
+                    min_date = df['Dates'].min()
+                    max_date = df['Dates'].max()
+                    date_range = st.date_input(
+                        "Date Range",
+                        value=[min_date, max_date],
+                        min_value=min_date,
+                        max_value=max_date
+                    )
+
+                # Depth range filter
+                if 'Depth' in df.columns:
+                    min_depth = float(df['Depth'].min())
+                    max_depth = float(df['Depth'].max())
+                    depth_range = st.slider(
+                        "Depth Range (m)",
+                        min_value=min_depth,
+                        max_value=max_depth,
+                        value=(min_depth, max_depth)
+                    )
+
+            # Apply filters
+            filtered_df = df.copy()
+            if selected_section != 'All':
+                filtered_df = filtered_df[filtered_df['section_id'] == int(selected_section)]
+            if selected_piezometer != 'All':
+                filtered_df = filtered_df[filtered_df['PIEZOMETER_ID'] == selected_piezometer]
+            
+            if 'Dates' in df.columns and len(date_range) == 2:
+                filtered_df = filtered_df[
+                    (filtered_df['Dates'].dt.date >= date_range[0]) &
+                    (filtered_df['Dates'].dt.date <= date_range[1])
+                ]
+            
+            if 'Depth' in df.columns:
+                filtered_df = filtered_df[
+                    (filtered_df['Depth'] >= depth_range[0]) &
+                    (filtered_df['Depth'] <= depth_range[1])
+                ]
+
+            # Main content
+            st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
+
+            # Tabs layout
+            tab1, tab2, tab3, tab4, tab5 = st.tabs([
+                "📈 Overview Dashboard",
+                "📊 Time Series Analysis",
+                "🗺️ Spatial Analysis",
+                "📋 Data Details",
+                "📉 Statistical Analysis"
+            ])
+
+            with tab1:
+                st.header("Overview Dashboard")
+
+                # Metrics row
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Total Readings", len(filtered_df))
+                col2.metric("Unique Piezometers", filtered_df['PIEZOMETER_ID'].nunique())
+                col3.metric("Sections Monitored", filtered_df['section_id'].nunique())
+                
+                if 'Dates' in filtered_df.columns:
+                    date_range_str = f"{filtered_df['Dates'].min().strftime('%Y-%m-%d')} to {filtered_df['Dates'].max().strftime('%Y-%m-%d')}"
+                else:
+                    date_range_str = "N/A"
+                col4.metric("Monitoring Period", date_range_str)
+
+                # Depth statistics
+                if 'Depth' in filtered_df.columns:
+                    st.subheader("Depth Statistics")
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Avg Depth", f"{filtered_df['Depth'].mean():.2f} m")
+                    col2.metric("Min Depth", f"{filtered_df['Depth'].min():.2f} m")
+                    col3.metric("Max Depth", f"{filtered_df['Depth'].max():.2f} m")
+                    col4.metric("Std Dev", f"{filtered_df['Depth'].std():.2f} m")
+
+                # Piezometer distribution
+                st.subheader("Piezometer Distribution by Section")
+                if not filtered_df.empty:
+                    section_counts = filtered_df.groupby('section_id')['PIEZOMETER_ID'].nunique().reset_index()
+                    fig = px.bar(
+                        section_counts,
+                        x='section_id',
+                        y='PIEZOMETER_ID',
+                        title='Number of Piezometers per Section',
+                        labels={'section_id': 'Section ID', 'PIEZOMETER_ID': 'Number of Piezometers'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+            with tab2:
+                st.header("Time Series Analysis")
+
+                if 'Dates' in filtered_df.columns and 'Depth' in filtered_df.columns:
+                    # Time series of depth readings
+                    st.subheader("Depth Readings Over Time")
+                    
+                    # Group by piezometer for better visualization
+                    if selected_piezometer == 'All':
+                        # Show all piezometers with different colors
+                        fig = px.line(
+                            filtered_df,
+                            x='Dates',
+                            y='Depth',
+                            color='PIEZOMETER_ID',
+                            title='Depth Readings by Piezometer Over Time',
+                            labels={'Dates': 'Date', 'Depth': 'Depth (m)', 'PIEZOMETER_ID': 'Piezometer'}
+                        )
+                    else:
+                        # Show single piezometer with trendline
+                        fig = px.line(
+                            filtered_df,
+                            x='Dates',
+                            y='Depth',
+                            title=f'Depth Readings for {selected_piezometer} Over Time',
+                            labels={'Dates': 'Date', 'Depth': 'Depth (m)'}
+                        )
+                        # Add trendline
+                        fig.add_trace(px.scatter(
+                            filtered_df,
+                            x='Dates',
+                            y='Depth',
+                            trendline="lowess"
+                        ).data[1])
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Water level elevation over time
+                    if 'WATER_LEVEL' in filtered_df.columns:
+                        st.subheader("Water Level Elevation Over Time")
+                        fig = px.line(
+                            filtered_df,
+                            x='Dates',
+                            y='WATER_LEVEL',
+                            color='PIEZOMETER_ID' if selected_piezometer == 'All' else None,
+                            title='Water Level Elevation Over Time',
+                            labels={'Dates': 'Date', 'WATER_LEVEL': 'Water Level Elevation (m)'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Monthly depth trends
+                    st.subheader("Monthly Depth Trends")
+                    filtered_df['Month'] = filtered_df['Dates'].dt.to_period('M').astype(str)
+                    monthly_avg = filtered_df.groupby(['Month', 'PIEZOMETER_ID'])['Depth'].mean().reset_index()
+                    
+                    fig = px.line(
+                        monthly_avg,
+                        x='Month',
+                        y='Depth',
+                        color='PIEZOMETER_ID',
+                        title='Average Monthly Depth by Piezometer',
+                        labels={'Month': 'Month', 'Depth': 'Average Depth (m)'}
+                    )
+                    fig.update_xaxis(tickangle=45)
+                    st.plotly_chart(fig, use_container_width=True)
+
+                else:
+                    st.warning("Date or Depth data not available for time series analysis")
+
+            with tab3:
+                st.header("Spatial Analysis")
+
+                if not filtered_df[['X', 'Y']].dropna().empty:
+                    # Create map
+                    map_center = [filtered_df['Y'].mean(), filtered_df['X'].mean()]
+                    m = folium.Map(location=map_center, zoom_start=12)
+
+                    # Add markers for each unique piezometer location
+                    unique_locations = filtered_df.drop_duplicates(subset=['PIEZOMETER_ID'])
+
+                    for _, row in unique_locations.dropna(subset=['X', 'Y']).iterrows():
+                        # Get latest reading for this piezometer
+                        latest_reading = filtered_df[filtered_df['PIEZOMETER_ID'] == row['PIEZOMETER_ID']].sort_values('Dates').iloc[-1]
+                        
+                        popup_content = f"""
+                        <b>Piezometer:</b> {row['PIEZOMETER_ID']}<br>
+                        <b>Type:</b> {row.get('PIEZOMETER_TYPE', 'N/A')}<br>
+                        <b>Section:</b> {row['section_id']}<br>
+                        <b>Installation:</b> {row.get('DATE OF INSTALLATION', 'N/A')}<br>
+                        <b>Latest Depth:</b> {latest_reading.get('Depth', 'N/A'):.2f} m<br>
+                        <b>Latest Reading:</b> {latest_reading.get('Dates', 'N/A')}
+                        <b>Chainage:</b> {row.get('CHAINAGE', 'N/A')}<br>
+                        <b>Offset:</b> {row.get('OFFSET', 'N/A')} m
+                        """
+
+                        # Color code by latest depth (deeper = bluer)
+                        depth = latest_reading.get('Depth', 0)
+                        color = f'#{min(255, int(depth * 10)):02x}{min(255, 255 - int(depth * 5)):02x}ff'
+
+                        folium.Marker(
+                            [row['Y'], row['X']],
+                            popup=folium.Popup(popup_content, max_width=300),
+                            tooltip=f"{row['PIEZOMETER_ID']} - {latest_reading.get('Depth', 'N/A'):.2f}m",
+                            icon=folium.Icon(color='blue', icon='tint', prefix='fa')
+                        ).add_to(m)
+
+                    folium_static(m, width=1200, height=600)
+
+                    # Depth contour plot (if enough data points)
+                    if len(unique_locations) > 4:
+                        st.subheader("Depth Distribution Map")
+                        try:
+                            fig = px.density_mapbox(
+                                filtered_df,
+                                lat='Y',
+                                lon='X',
+                                z='Depth',
+                                radius=20,
+                                center=dict(lat=filtered_df['Y'].mean(), lon=filtered_df['X'].mean()),
+                                zoom=10,
+                                mapbox_style="open-street-map",
+                                title="Depth Distribution Heatmap"
+                            )
+                            st.plotly_chart(fig, use_container_width=True)
+                        except:
+                            st.info("Insufficient data for heatmap visualization")
+
+                else:
+                    st.warning("No spatial coordinates available for mapping")
+
+            with tab4:
+                st.header("Data Details")
+
+                # Search and filter options
+                col1, col2 = st.columns(2)
+                with col1:
+                    search_query = st.text_input("🔍 Search by Piezometer ID or Type")
+                with col2:
+                    sort_by = st.selectbox("Sort by", ['Date', 'Depth', 'Section', 'Piezometer'])
+
+                if search_query:
+                    display_df = filtered_df[
+                        filtered_df['PIEZOMETER_ID'].str.contains(search_query, case=False, na=False) |
+                        filtered_df['PIEZOMETER_TYPE'].str.contains(search_query, case=False, na=False)
+                    ]
+                else:
+                    display_df = filtered_df.copy()
+
+                # Sort data
+                sort_columns = {
+                    'Date': 'Dates',
+                    'Depth': 'Depth',
+                    'Section': 'section_id',
+                    'Piezometer': 'PIEZOMETER_ID'
+                }
+                if sort_columns[sort_by] in display_df.columns:
+                    display_df = display_df.sort_values(sort_columns[sort_by], ascending=False)
+
+                # Display data table
+                columns_to_show = [
+                    'section_id', 'PIEZOMETER_ID', 'PIEZOMETER_TYPE', 'Dates',
+                    'Depth', 'Elevation', 'GROUND LEVEL ELEV', 'CHAINAGE', 'OFFSET'
+                ]
+                available_columns = [col for col in columns_to_show if col in display_df.columns]
+                
+                st.dataframe(
+                    display_df[available_columns],
+                    use_container_width=True,
+                    height=400
+                )
+
+                # Export functionality
+                if st.button("📥 Export Data to CSV"):
+                    csv = display_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name="ghatz_standpipe_data.csv",
+                        mime="text/csv"
+                    )
+
+                # Summary statistics
+                st.subheader("Summary Statistics")
+                if 'Depth' in display_df.columns:
+                    st.write(display_df['Depth'].describe())
+
+            with tab5:
+                st.header("Statistical Analysis")
+
+                if 'Depth' in filtered_df.columns:
+                    # Distribution analysis
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        st.subheader("Depth Distribution")
+                        fig = px.histogram(
+                            filtered_df,
+                            x='Depth',
+                            nbins=20,
+                            title='Distribution of Depth Readings',
+                            labels={'Depth': 'Depth (m)'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    with col2:
+                        st.subheader("Box Plot by Piezometer")
+                        fig = px.box(
+                            filtered_df,
+                            x='PIEZOMETER_ID',
+                            y='Depth',
+                            title='Depth Distribution by Piezometer',
+                            labels={'PIEZOMETER_ID': 'Piezometer', 'Depth': 'Depth (m)'}
+                        )
+                        fig.update_xaxis(tickangle=45)
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Correlation analysis
+                    st.subheader("Correlation Analysis")
+                    numeric_cols = ['Depth', 'Elevation', 'GROUND LEVEL ELEV', 'CHAINAGE', 'OFFSET']
+                    available_numeric = [col for col in numeric_cols if col in filtered_df.columns]
+                    
+                    if len(available_numeric) > 1:
+                        corr_matrix = filtered_df[available_numeric].corr()
+                        fig = px.imshow(
+                            corr_matrix,
+                            text_auto=True,
+                            aspect="auto",
+                            title='Correlation Matrix'
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                    # Trend analysis by section
+                    st.subheader("Depth Trends by Section")
+                    if 'section_id' in filtered_df.columns and 'Dates' in filtered_df.columns:
+                        section_trends = filtered_df.groupby(['section_id', pd.Grouper(key='Dates', freq='M')])['Depth'].mean().reset_index()
+                        fig = px.line(
+                            section_trends,
+                            x='Dates',
+                            y='Depth',
+                            color='section_id',
+                            title='Monthly Average Depth by Section',
+                            labels={'Dates': 'Date', 'Depth': 'Average Depth (m)', 'section_id': 'Section'}
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
+
+                else:
+                    st.warning("Depth data not available for statistical analysis")
+
+        if __name__ == "__main__":
+            main()
+
+    # Call the function to run the app
+    standpipe_analysis()
 def show_ghatzVibratingWire_page(client):
     st.write("Vibrating Wire Analysis")
 def show_ghatzSeepage_page(client):
