@@ -3036,6 +3036,21 @@ def show_ghatzStandpipe_page(client):
                     if col in df.columns:
                         df[col] = pd.to_datetime(df[col], errors='coerce', dayfirst=True)
                 
+                # Handle special text values in Depth and Elevation columns
+                def convert_special_values(value):
+                    if isinstance(value, str):
+                        value = value.strip().lower()
+                        if value == 'dry':
+                            return -999  # Special code for dry measurements
+                        elif value == 'block' or value == 'blocked':
+                            return -888  # Special code for blocked measurements
+                    return value
+                
+                # Apply conversion to Depth and Elevation columns
+                for col in ['Depth', 'Elevation']:
+                    if col in df.columns:
+                        df[col] = df[col].apply(convert_special_values)
+                
                 # Convert numeric columns
                 numeric_cols = ['section_id', 'CHAINAGE', 'OFFSET', 'X', 'Y', 'GROUND LEVEL ELEV', 
                                'Depth', 'Elevation']
@@ -3053,9 +3068,16 @@ def show_ghatzStandpipe_page(client):
                     df['DAYS_SINCE_INSTALLATION'] = (df['Dates'] - df['DATE OF INSTALLATION']).dt.days
                     df['MONTHS_SINCE_INSTALLATION'] = df['DAYS_SINCE_INSTALLATION'] / 30.44
                 
-                # Calculate water level changes
+                # Calculate water level changes (only for valid numeric values)
                 if 'Depth' in df.columns and 'GROUND LEVEL ELEV' in df.columns:
-                    df['WATER_LEVEL'] = df['GROUND LEVEL ELEV'] - df['Depth']
+                    # Only calculate for valid depth values (positive numbers)
+                    valid_depth_mask = (df['Depth'] > 0) & (df['Depth'] < 1000)  # Reasonable depth range
+                    df.loc[valid_depth_mask, 'WATER_LEVEL'] = df.loc[valid_depth_mask, 'GROUND LEVEL ELEV'] - df.loc[valid_depth_mask, 'Depth']
+                
+                # Add status column for special conditions
+                df['STATUS'] = 'Normal'
+                df.loc[df['Depth'] == -999, 'STATUS'] = 'Dry'
+                df.loc[df['Depth'] == -888, 'STATUS'] = 'Blocked'
                 
                 return df
 
@@ -3094,6 +3116,14 @@ def show_ghatzStandpipe_page(client):
                     index=0
                 )
 
+                # Status filter
+                status_options = ['All'] + sorted(df['STATUS'].dropna().unique())
+                selected_status = st.selectbox(
+                    "Select Status",
+                    status_options,
+                    index=0
+                )
+
                 # Date range filter
                 if 'Dates' in df.columns:
                     min_date = df['Dates'].min()
@@ -3105,12 +3135,13 @@ def show_ghatzStandpipe_page(client):
                         max_value=max_date
                     )
 
-                # Depth range filter
-                if 'Depth' in df.columns:
-                    min_depth = float(df['Depth'].min())
-                    max_depth = float(df['Depth'].max())
+                # Depth range filter (only for normal readings)
+                normal_readings = df[df['STATUS'] == 'Normal']
+                if 'Depth' in normal_readings.columns and len(normal_readings) > 0:
+                    min_depth = float(normal_readings['Depth'].min())
+                    max_depth = float(normal_readings['Depth'].max())
                     depth_range = st.slider(
-                        "Depth Range (m)",
+                        "Depth Range (m) - Normal Readings Only",
                         min_value=min_depth,
                         max_value=max_depth,
                         value=(min_depth, max_depth)
@@ -3122,6 +3153,8 @@ def show_ghatzStandpipe_page(client):
                 filtered_df = filtered_df[filtered_df['section_id'] == int(selected_section)]
             if selected_piezometer != 'All':
                 filtered_df = filtered_df[filtered_df['PIEZOMETER_ID'] == selected_piezometer]
+            if selected_status != 'All':
+                filtered_df = filtered_df[filtered_df['STATUS'] == selected_status]
             
             if 'Dates' in df.columns and len(date_range) == 2:
                 filtered_df = filtered_df[
@@ -3129,11 +3162,14 @@ def show_ghatzStandpipe_page(client):
                     (filtered_df['Dates'].dt.date <= date_range[1])
                 ]
             
-            if 'Depth' in df.columns:
-                filtered_df = filtered_df[
-                    (filtered_df['Depth'] >= depth_range[0]) &
-                    (filtered_df['Depth'] <= depth_range[1])
-                ]
+            # Apply depth filter only for normal readings
+            if 'Depth' in df.columns and selected_status in ['All', 'Normal']:
+                normal_mask = filtered_df['STATUS'] == 'Normal'
+                if normal_mask.any():
+                    filtered_df.loc[normal_mask] = filtered_df.loc[normal_mask][
+                        (filtered_df.loc[normal_mask, 'Depth'] >= depth_range[0]) &
+                        (filtered_df.loc[normal_mask, 'Depth'] <= depth_range[1])
+                    ]
 
             # Main content
             st.write(f"📊 Displaying {len(filtered_df)} of {len(df)} records")
@@ -3162,14 +3198,31 @@ def show_ghatzStandpipe_page(client):
                     date_range_str = "N/A"
                 col4.metric("Monitoring Period", date_range_str)
 
-                # Depth statistics
-                if 'Depth' in filtered_df.columns:
-                    st.subheader("Depth Statistics")
+                # Status distribution
+                st.subheader("Reading Status Distribution")
+                status_counts = filtered_df['STATUS'].value_counts().reset_index()
+                status_counts.columns = ['Status', 'Count']
+                
+                fig = px.pie(
+                    status_counts,
+                    names='Status',
+                    values='Count',
+                    hole=0.3,
+                    title='Distribution of Reading Status'
+                )
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Depth statistics (only for normal readings)
+                normal_readings = filtered_df[filtered_df['STATUS'] == 'Normal']
+                if len(normal_readings) > 0:
+                    st.subheader("Depth Statistics (Normal Readings Only)")
                     col1, col2, col3, col4 = st.columns(4)
-                    col1.metric("Avg Depth", f"{filtered_df['Depth'].mean():.2f} m")
-                    col2.metric("Min Depth", f"{filtered_df['Depth'].min():.2f} m")
-                    col3.metric("Max Depth", f"{filtered_df['Depth'].max():.2f} m")
-                    col4.metric("Std Dev", f"{filtered_df['Depth'].std():.2f} m")
+                    col1.metric("Avg Depth", f"{normal_readings['Depth'].mean():.2f} m")
+                    col2.metric("Min Depth", f"{normal_readings['Depth'].min():.2f} m")
+                    col3.metric("Max Depth", f"{normal_readings['Depth'].max():.2f} m")
+                    col4.metric("Std Dev", f"{normal_readings['Depth'].std():.2f} m")
+                else:
+                    st.info("No normal depth readings available for the selected filters")
 
                 # Piezometer distribution
                 st.subheader("Piezometer Distribution by Section")
@@ -3187,45 +3240,61 @@ def show_ghatzStandpipe_page(client):
             with tab2:
                 st.header("Time Series Analysis")
 
-                if 'Dates' in filtered_df.columns and 'Depth' in filtered_df.columns:
-                    # Time series of depth readings
-                    st.subheader("Depth Readings Over Time")
+                if 'Dates' in filtered_df.columns:
+                    # Time series with status indication
+                    st.subheader("Readings Over Time with Status")
                     
-                    # Group by piezometer for better visualization
-                    if selected_piezometer == 'All':
-                        # Show all piezometers with different colors
-                        fig = px.line(
-                            filtered_df,
-                            x='Dates',
-                            y='Depth',
-                            color='PIEZOMETER_ID',
-                            title='Depth Readings by Piezometer Over Time',
-                            labels={'Dates': 'Date', 'Depth': 'Depth (m)', 'PIEZOMETER_ID': 'Piezometer'}
-                        )
-                    else:
-                        # Show single piezometer with trendline
-                        fig = px.line(
-                            filtered_df,
-                            x='Dates',
-                            y='Depth',
-                            title=f'Depth Readings for {selected_piezometer} Over Time',
-                            labels={'Dates': 'Date', 'Depth': 'Depth (m)'}
-                        )
-                        # Add trendline
-                        fig.add_trace(px.scatter(
-                            filtered_df,
-                            x='Dates',
-                            y='Depth',
-                            trendline="lowess"
-                        ).data[1])
+                    # Create a combined plot showing both normal readings and special conditions
+                    fig = go.Figure()
+                    
+                    # Add normal readings
+                    normal_data = filtered_df[filtered_df['STATUS'] == 'Normal']
+                    if len(normal_data) > 0:
+                        fig.add_trace(go.Scatter(
+                            x=normal_data['Dates'],
+                            y=normal_data['Depth'],
+                            mode='markers+lines',
+                            name='Normal Readings',
+                            marker=dict(color='blue'),
+                            line=dict(color='blue')
+                        ))
+                    
+                    # Add dry readings
+                    dry_data = filtered_df[filtered_df['STATUS'] == 'Dry']
+                    if len(dry_data) > 0:
+                        fig.add_trace(go.Scatter(
+                            x=dry_data['Dates'],
+                            y=[dry_data['Depth'].min() - 1] * len(dry_data),  # Place below normal range
+                            mode='markers',
+                            name='Dry',
+                            marker=dict(color='orange', symbol='x', size=10)
+                        ))
+                    
+                    # Add blocked readings
+                    blocked_data = filtered_df[filtered_df['STATUS'] == 'Blocked']
+                    if len(blocked_data) > 0:
+                        fig.add_trace(go.Scatter(
+                            x=blocked_data['Dates'],
+                            y=[blocked_data['Depth'].min() - 2] * len(blocked_data),  # Place below dry
+                            mode='markers',
+                            name='Blocked',
+                            marker=dict(color='red', symbol='square', size=10)
+                        ))
+                    
+                    fig.update_layout(
+                        title='Depth Readings with Status Indicators',
+                        xaxis_title='Date',
+                        yaxis_title='Depth (m)',
+                        showlegend=True
+                    )
                     
                     st.plotly_chart(fig, use_container_width=True)
 
-                    # Water level elevation over time
-                    if 'WATER_LEVEL' in filtered_df.columns:
-                        st.subheader("Water Level Elevation Over Time")
+                    # Water level elevation over time (only normal readings)
+                    if 'WATER_LEVEL' in normal_data.columns and len(normal_data) > 0:
+                        st.subheader("Water Level Elevation Over Time (Normal Readings)")
                         fig = px.line(
-                            filtered_df,
+                            normal_data,
                             x='Dates',
                             y='WATER_LEVEL',
                             color='PIEZOMETER_ID' if selected_piezometer == 'All' else None,
@@ -3234,24 +3303,20 @@ def show_ghatzStandpipe_page(client):
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
-                    # Monthly depth trends
-                    st.subheader("Monthly Depth Trends")
-                    filtered_df['Month'] = filtered_df['Dates'].dt.to_period('M').astype(str)
-                    monthly_avg = filtered_df.groupby(['Month', 'PIEZOMETER_ID'])['Depth'].mean().reset_index()
+                    # Monthly status trends
+                    st.subheader("Monthly Status Distribution")
+                    monthly_status = filtered_df.groupby([filtered_df['Dates'].dt.to_period('M').astype(str), 'STATUS']).size().unstack().fillna(0)
                     
-                    fig = px.line(
-                        monthly_avg,
-                        x='Month',
-                        y='Depth',
-                        color='PIEZOMETER_ID',
-                        title='Average Monthly Depth by Piezometer',
-                        labels={'Month': 'Month', 'Depth': 'Average Depth (m)'}
+                    fig = px.bar(
+                        monthly_status,
+                        title='Monthly Distribution of Reading Status',
+                        labels={'value': 'Count', 'variable': 'Status'}
                     )
-                    fig.update_xaxis(tickangle=45)
+                    fig.update_layout(xaxis_tickangle=45)
                     st.plotly_chart(fig, use_container_width=True)
 
                 else:
-                    st.warning("Date or Depth data not available for time series analysis")
+                    st.warning("Date data not available for time series analysis")
 
             with tab3:
                 st.header("Spatial Analysis")
@@ -3261,55 +3326,55 @@ def show_ghatzStandpipe_page(client):
                     map_center = [filtered_df['Y'].mean(), filtered_df['X'].mean()]
                     m = folium.Map(location=map_center, zoom_start=12)
 
+                    # Color mapping for status
+                    status_colors = {
+                        'Normal': 'green',
+                        'Dry': 'orange',
+                        'Blocked': 'red'
+                    }
+
                     # Add markers for each unique piezometer location
                     unique_locations = filtered_df.drop_duplicates(subset=['PIEZOMETER_ID'])
 
                     for _, row in unique_locations.dropna(subset=['X', 'Y']).iterrows():
                         # Get latest reading for this piezometer
-                        latest_reading = filtered_df[filtered_df['PIEZOMETER_ID'] == row['PIEZOMETER_ID']].sort_values('Dates').iloc[-1]
+                        piezometer_data = filtered_df[filtered_df['PIEZOMETER_ID'] == row['PIEZOMETER_ID']]
+                        latest_reading = piezometer_data.sort_values('Dates').iloc[-1]
+                        
+                        # Determine status color
+                        status = latest_reading.get('STATUS', 'Normal')
+                        color = status_colors.get(status, 'blue')
                         
                         popup_content = f"""
                         <b>Piezometer:</b> {row['PIEZOMETER_ID']}<br>
                         <b>Type:</b> {row.get('PIEZOMETER_TYPE', 'N/A')}<br>
                         <b>Section:</b> {row['section_id']}<br>
-                        <b>Installation:</b> {row.get('DATE OF INSTALLATION', 'N/A')}<br>
-                        <b>Latest Depth:</b> {latest_reading.get('Depth', 'N/A'):.2f} m<br>
-                        <b>Latest Reading:</b> {latest_reading.get('Dates', 'N/A')}
+                        <b>Status:</b> {status}<br>
+                        <b>Latest Depth:</b> {latest_reading.get('Depth', 'N/A')}<br>
+                        <b>Latest Reading:</b> {latest_reading.get('Dates', 'N/A')}<br>
                         <b>Chainage:</b> {row.get('CHAINAGE', 'N/A')}<br>
                         <b>Offset:</b> {row.get('OFFSET', 'N/A')} m
                         """
 
-                        # Color code by latest depth (deeper = bluer)
-                        depth = latest_reading.get('Depth', 0)
-                        color = f'#{min(255, int(depth * 10)):02x}{min(255, 255 - int(depth * 5)):02x}ff'
-
                         folium.Marker(
                             [row['Y'], row['X']],
                             popup=folium.Popup(popup_content, max_width=300),
-                            tooltip=f"{row['PIEZOMETER_ID']} - {latest_reading.get('Depth', 'N/A'):.2f}m",
-                            icon=folium.Icon(color='blue', icon='tint', prefix='fa')
+                            tooltip=f"{row['PIEZOMETER_ID']} - {status}",
+                            icon=folium.Icon(color=color, icon='tint', prefix='fa')
                         ).add_to(m)
 
-                    folium_static(m, width=1200, height=600)
+                    # Add legend
+                    legend_html = '''
+                    <div style="position: fixed; bottom: 50px; left: 50px; z-index: 1000; background-color: white; padding: 10px; border: 2px solid grey;">
+                    <h4>Status Legend</h4>
+                    <p><span style="color: green;">●</span> Normal</p>
+                    <p><span style="color: orange;">●</span> Dry</p>
+                    <p><span style="color: red;">●</span> Blocked</p>
+                    </div>
+                    '''
+                    m.get_root().html.add_child(folium.Element(legend_html))
 
-                    # Depth contour plot (if enough data points)
-                    if len(unique_locations) > 4:
-                        st.subheader("Depth Distribution Map")
-                        try:
-                            fig = px.density_mapbox(
-                                filtered_df,
-                                lat='Y',
-                                lon='X',
-                                z='Depth',
-                                radius=20,
-                                center=dict(lat=filtered_df['Y'].mean(), lon=filtered_df['X'].mean()),
-                                zoom=10,
-                                mapbox_style="open-street-map",
-                                title="Depth Distribution Heatmap"
-                            )
-                            st.plotly_chart(fig, use_container_width=True)
-                        except:
-                            st.info("Insufficient data for heatmap visualization")
+                    folium_static(m, width=1200, height=600)
 
                 else:
                     st.warning("No spatial coordinates available for mapping")
@@ -3322,12 +3387,13 @@ def show_ghatzStandpipe_page(client):
                 with col1:
                     search_query = st.text_input("🔍 Search by Piezometer ID or Type")
                 with col2:
-                    sort_by = st.selectbox("Sort by", ['Date', 'Depth', 'Section', 'Piezometer'])
+                    sort_by = st.selectbox("Sort by", ['Date', 'Depth', 'Section', 'Piezometer', 'Status'])
 
                 if search_query:
                     display_df = filtered_df[
                         filtered_df['PIEZOMETER_ID'].str.contains(search_query, case=False, na=False) |
-                        filtered_df['PIEZOMETER_TYPE'].str.contains(search_query, case=False, na=False)
+                        filtered_df['PIEZOMETER_TYPE'].str.contains(search_query, case=False, na=False) |
+                        filtered_df['STATUS'].str.contains(search_query, case=False, na=False)
                     ]
                 else:
                     display_df = filtered_df.copy()
@@ -3337,15 +3403,23 @@ def show_ghatzStandpipe_page(client):
                     'Date': 'Dates',
                     'Depth': 'Depth',
                     'Section': 'section_id',
-                    'Piezometer': 'PIEZOMETER_ID'
+                    'Piezometer': 'PIEZOMETER_ID',
+                    'Status': 'STATUS'
                 }
                 if sort_columns[sort_by] in display_df.columns:
                     display_df = display_df.sort_values(sort_columns[sort_by], ascending=False)
 
+                # Format depth values for display
+                display_df = display_df.copy()
+                display_df['Depth_Display'] = display_df.apply(
+                    lambda x: 'Dry' if x['STATUS'] == 'Dry' else ('Blocked' if x['STATUS'] == 'Blocked' else f"{x['Depth']:.2f} m"),
+                    axis=1
+                )
+
                 # Display data table
                 columns_to_show = [
                     'section_id', 'PIEZOMETER_ID', 'PIEZOMETER_TYPE', 'Dates',
-                    'Depth', 'Elevation', 'GROUND LEVEL ELEV', 'CHAINAGE', 'OFFSET'
+                    'Depth_Display', 'STATUS', 'GROUND LEVEL ELEV', 'CHAINAGE', 'OFFSET'
                 ]
                 available_columns = [col for col in columns_to_show if col in display_df.columns]
                 
@@ -3367,46 +3441,53 @@ def show_ghatzStandpipe_page(client):
 
                 # Summary statistics
                 st.subheader("Summary Statistics")
-                if 'Depth' in display_df.columns:
-                    st.write(display_df['Depth'].describe())
+                normal_stats = filtered_df[filtered_df['STATUS'] == 'Normal']
+                if len(normal_stats) > 0:
+                    st.write("**Normal Readings:**")
+                    st.write(normal_stats['Depth'].describe())
+                
+                st.write(f"**Dry Readings:** {len(filtered_df[filtered_df['STATUS'] == 'Dry'])}")
+                st.write(f"**Blocked Readings:** {len(filtered_df[filtered_df['STATUS'] == 'Blocked'])}")
 
             with tab5:
                 st.header("Statistical Analysis")
 
-                if 'Depth' in filtered_df.columns:
+                normal_data = filtered_df[filtered_df['STATUS'] == 'Normal']
+                
+                if len(normal_data) > 0:
                     # Distribution analysis
                     col1, col2 = st.columns(2)
                     
                     with col1:
-                        st.subheader("Depth Distribution")
+                        st.subheader("Depth Distribution (Normal Readings)")
                         fig = px.histogram(
-                            filtered_df,
+                            normal_data,
                             x='Depth',
                             nbins=20,
-                            title='Distribution of Depth Readings',
+                            title='Distribution of Normal Depth Readings',
                             labels={'Depth': 'Depth (m)'}
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
                     with col2:
-                        st.subheader("Box Plot by Piezometer")
+                        st.subheader("Box Plot by Piezometer (Normal Readings)")
                         fig = px.box(
-                            filtered_df,
+                            normal_data,
                             x='PIEZOMETER_ID',
                             y='Depth',
                             title='Depth Distribution by Piezometer',
                             labels={'PIEZOMETER_ID': 'Piezometer', 'Depth': 'Depth (m)'}
                         )
-                        fig.update_xaxis(tickangle=45)
+                        fig.update_layout(xaxis_tickangle=45)
                         st.plotly_chart(fig, use_container_width=True)
 
                     # Correlation analysis
-                    st.subheader("Correlation Analysis")
+                    st.subheader("Correlation Analysis (Normal Readings)")
                     numeric_cols = ['Depth', 'Elevation', 'GROUND LEVEL ELEV', 'CHAINAGE', 'OFFSET']
-                    available_numeric = [col for col in numeric_cols if col in filtered_df.columns]
+                    available_numeric = [col for col in numeric_cols if col in normal_data.columns]
                     
                     if len(available_numeric) > 1:
-                        corr_matrix = filtered_df[available_numeric].corr()
+                        corr_matrix = normal_data[available_numeric].corr()
                         fig = px.imshow(
                             corr_matrix,
                             text_auto=True,
@@ -3415,22 +3496,8 @@ def show_ghatzStandpipe_page(client):
                         )
                         st.plotly_chart(fig, use_container_width=True)
 
-                    # Trend analysis by section
-                    st.subheader("Depth Trends by Section")
-                    if 'section_id' in filtered_df.columns and 'Dates' in filtered_df.columns:
-                        section_trends = filtered_df.groupby(['section_id', pd.Grouper(key='Dates', freq='M')])['Depth'].mean().reset_index()
-                        fig = px.line(
-                            section_trends,
-                            x='Dates',
-                            y='Depth',
-                            color='section_id',
-                            title='Monthly Average Depth by Section',
-                            labels={'Dates': 'Date', 'Depth': 'Average Depth (m)', 'section_id': 'Section'}
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-
                 else:
-                    st.warning("Depth data not available for statistical analysis")
+                    st.warning("No normal readings available for statistical analysis")
 
         if __name__ == "__main__":
             main()
